@@ -19,6 +19,9 @@ final class AppSettingsHost: SettingsBridgeHost {
     var foundAppUpdate: AppUpdateWatch.Found?
     /// Opens Sparkle's update window. The updater belongs to the app delegate.
     var onInstallAppUpdate: (() -> Void)?
+    /// Re-reads the installed PsyNeuLink and updates the record (#9). The
+    /// running environment belongs to the app delegate, so it does this.
+    var onSyncPsyNeuLinkSource: (() -> Void)?
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -107,6 +110,12 @@ final class AppSettingsHost: SettingsBridgeHost {
 
     func installAppUpdate() {
         onInstallAppUpdate?()
+    }
+
+    var pnlRecord: String { preferences.pnlSourceDescription }
+
+    func syncPsyNeuLinkSource() {
+        onSyncPsyNeuLinkSource?()
     }
 
     func switchInstall(_ decision: InstallSwitch.Decision) {

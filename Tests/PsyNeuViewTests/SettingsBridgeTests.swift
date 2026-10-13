@@ -40,6 +40,9 @@ final class SettingsBridgeTests: XCTestCase {
             AppUpdateWatch.bridgeValue(running: "0.5.22", found: found)
         }
         func installAppUpdate() { installRequests += 1 }
+        var pnlRecord = "github:devel"
+        var pnlSyncRequests = 0
+        func syncPsyNeuLinkSource() { pnlSyncRequests += 1; pnlRecord = "local:/checkout" }
     }
 
     private func reply(_ outcome: SettingsBridge.Outcome) -> [String: Any]? {
@@ -237,5 +240,18 @@ final class SettingsBridgeTests: XCTestCase {
         let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "installUpdate"], host: host)))
         XCTAssertEqual(host.installRequests, 1)
         XCTAssertNotNil(snapshot["appUpdate"])
+    }
+
+    func testSnapshotCarriesThePsyNeuLinkRecord() throws {
+        let host = FakeHost()
+        let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual(snapshot["pnlRecord"] as? String, "github:devel")
+    }
+
+    func testSyncPnlSourceRereadsAndRepliesWithTheNewRecord() throws {
+        let host = FakeHost()
+        let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "syncPnlSource"], host: host)))
+        XCTAssertEqual(host.pnlSyncRequests, 1)
+        XCTAssertEqual(snapshot["pnlRecord"] as? String, "local:/checkout")
     }
 }
