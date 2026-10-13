@@ -613,18 +613,23 @@ enum ProblemReport {
             truncationNote: "_(Cut to fit a GitHub link. The full report is in \(r.reference).)_")
     }
 
-    /// Gmail's web compose, with the summary and a note to attach the folder.
+    /// The first line of a Gmail report: a link can't attach files, so the
+    /// sender has to (#5). First, not last, so it's read and survives a cut.
+    static func gmailAttachRequest(_ r: Request) -> String {
+        "Please attach \(r.reference).zip before sending (it's selected in Finder, in your Downloads "
+            + "folder). Without it the report has no logs or screenshot."
+    }
+
+    /// Gmail's web compose: the attach request first, then the summary.
     /// A link can't attach files.
     static func gmailURL(_ r: Request, to: String, home: String = NSHomeDirectory(),
                          maxLength: Int = maxURLLength) -> URL? {
-        let body = summary(r, home: home)
-            + "\n\nPlease attach the folder \(r.reference) from your Downloads folder "
-            + "(or \(r.reference).zip beside it) before sending."
+        let body = gmailAttachRequest(r) + "\n\n" + summary(r, home: home)
         return link(
             "https://mail.google.com/mail/",
             fields: [("view", "cm"), ("fs", "1"), ("to", to), ("su", emailSubject(r)), ("body", body)],
             maxLength: maxLength,
-            truncationNote: "(Cut to fit a link. Please attach the folder \(r.reference) from Downloads.)")
+            truncationNote: "(Cut to fit a link. Please attach \(r.reference).zip from Downloads.)")
     }
 
     static func emailSubject(_ r: Request) -> String {
