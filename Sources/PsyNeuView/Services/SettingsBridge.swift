@@ -23,6 +23,13 @@ protocol SettingsBridgeHost: AnyObject {
     func appUpdate() -> [String: Any]
     /// Opens Sparkle's own update window for the waiting update (#6).
     func installAppUpdate()
+    /// The app's record of where PsyNeuLink comes from (#9), as
+    /// `Preferences.pnlSourceDescription`: "github:devel", "pypi" or
+    /// "local:<path>". The page compares it with the live install.
+    var pnlRecord: String { get }
+    /// Re-read the PsyNeuLink actually installed and bring the record in step
+    /// (#9). The page calls this after a switch made through the backend.
+    func syncPsyNeuLinkSource()
 }
 
 /// The `pnvSettings` bridge between PsyNeuView's Settings and the app (#200).
@@ -48,11 +55,18 @@ protocol SettingsBridgeHost: AnyObject {
 ///          starts again; the page goes away with the old server)
 ///     { op: "installUpdate" }                        -> Snapshot
 ///         (opens Sparkle's update window for the waiting app update; #6)
+///     { op: "syncPnlSource" }                        -> Snapshot
+///         (re-reads the PsyNeuLink installed in the running environment and
+///          makes the app's record match; the page calls it after a switch
+///          made through the backend; #9)
 ///
 ///     Snapshot = { install: { running, choice, checkoutPath, includedVersion,
 ///                             recentCheckouts }, autoRestart, launchAtLogin,
 ///                  developerMode, reportSendWith, reportSendTo,
-///                  reportSendToDefault, appUpdate }
+///                  reportSendToDefault, appUpdate, pnlRecord }
+///         pnlRecord = "github:<branch>" | "pypi" | "local:<path>"
+///           (#9; the app's record of the PsyNeuLink source, absent from apps
+///            before it)
 ///         appUpdate = { available: false }
 ///                   | { available: true, version, releaseNotesURL | null }
 ///           (#6; absent from apps before it, so the page treats a missing
@@ -173,6 +187,10 @@ enum SettingsBridge {
             host.installAppUpdate()
             return Outcome(reply: .success(snapshot(host)))
 
+        case "syncPnlSource":
+            host.syncPsyNeuLinkSource()
+            return Outcome(reply: .success(snapshot(host)))
+
         case "checkInstall", "switchInstall":
             guard let choice = choice(from: body) else {
                 return fail("pnvSettings: 'choice' must be \"bundled\" or \"checkout\"")
@@ -220,6 +238,7 @@ enum SettingsBridge {
             "reportSendTo": host.reportSendTo,
             "reportSendToDefault": ReportDefaults.contactEmail,
             "appUpdate": host.appUpdate(),
+            "pnlRecord": host.pnlRecord,
         ]
     }
 
