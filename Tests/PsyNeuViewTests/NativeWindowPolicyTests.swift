@@ -25,7 +25,7 @@ final class NativeWindowPolicyTests: XCTestCase {
     /// same reason next to the code that makes it. "It was quicker" is not a
     /// reason; a settings window never is (that's PsyNeuView's Settings).
     static let allowedWindows: [String: String] = [
-        "AppDelegate.swift › showAppWindow":
+        "AppDelegate.swift › openAppWindow":
             "The app window itself: it hosts PsyNeuView's React UI.",
         "AppDelegate.swift › showSetupWizard":
             "Setup Wizard: runs on first launch, before any PsyNeuView is installed.",
