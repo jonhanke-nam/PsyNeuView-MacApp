@@ -146,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsHost.onDeveloperModeChanged = { [weak self] _ in self?.refreshCodeUpdateVisibility() }
         settingsHost.onSwitchInstall = { [weak self] decision in self?.switchInstall(decision) }
         settingsHost.onInstallAppUpdate = { [weak self] in self?.sparkleUpdater.checkForUpdates(nil) }
+        settingsHost.onSyncPsyNeuLinkSource = { [weak self] in
+            guard let self else { return }
+            self.reconcilePsyNeuLinkRecord(repoPath: self.appState.repoPath ?? self.preferences.repoPath)
+        }
         appUpdateObserver.onChange = { [weak self] found in
             guard let self, let host = self.settingsHost else { return }
             MainActor.assumeIsolated {
@@ -1036,6 +1040,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // The app's record of the PsyNeuLink source follows what is actually
+        // installed (#9), so About, Problem Reports and any later rebuild agree
+        // with the page.
+        reconcilePsyNeuLinkRecord(repoPath: repoPath)
+
         // Verify the tree is still there and runnable. Accepts a bundled tree as
         // well as a clone — the bundled one has no Makefile. (#89)
         guard BundledPsyNeuView.isRunnableTree(at: repoPath) else {
@@ -1175,7 +1184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             checkoutPath: checkoutPath,
             checkoutBranch: checkoutBranch,
             psyNeuLinkVersion: psyNeuLinkVersion,
-            psyNeuLinkSource: preferences.pnlSourceDescription,
+            psyNeuLinkSource: livePsyNeuLinkDescription(),
             availableSources: VersionReport.availablePsyNeuLinkSources(),
             identity: AppIdentity.current,
             buildCommit: VersionReport.buildCommit(),
@@ -1331,7 +1340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         Task { @MainActor in
             let repaired = await installer.repairEnvironment(
-                repoPath: repoPath, pnlPipArgs: preferences.pnlPipArgs)
+                repoPath: repoPath, pnlPipArgs: pnlPipArgsKeepingLiveSource(leaving: repoPath))
             if repaired {
                 logCollector.add("Environment rebuilt — starting PsyNeuView.", source: .system)
                 startServices()
@@ -1562,6 +1571,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Every app setting, for the report (#208).
     private func settingsSnapshot() -> SettingsSnapshot.Values {
+        // A report states the PsyNeuLink actually installed, not a stale record (#9).
+        reconcilePsyNeuLinkRecord(repoPath: appState.repoPath ?? preferences.repoPath)
         let sparkle = sparkleUpdater.updater
         return preferences.snapshotValues(
             lastBackendPort: PortChecker.rememberedPort(),
@@ -1634,7 +1645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             appBuild: info?["CFBundleVersion"] as? String,
             psyNeuViewVersion: psyNeuViewVersion,
             install: InstallSwitch.describeRunning(preferences.repoPath),
-            psyNeuLinkSource: preferences.pnlSourceDescription,
+            psyNeuLinkSource: livePsyNeuLinkDescription(),
             psyNeuLinkVersion: psyNeuLinkVersion,
             developerMode: preferences.developerMode,
             server: server,
@@ -1900,6 +1911,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// The pip arguments for a new environment that keep the PsyNeuLink in
+    /// use in `leaving` (#9): what pip installed there, else the app's record.
+    /// The record is brought into step at the same time, and the choice logged.
+    func pnlPipArgsKeepingLiveSource(leaving: URL?) -> [String] {
+        guard let live = LivePsyNeuLink.read(environmentOf: leaving) else {
+            logCollector.add(
+                "Installing PsyNeuLink from the saved choice (\(preferences.pnlSourceDescription)).",
+                source: .system)
+            return preferences.pnlPipArgs
+        }
+        if let changed = LivePsyNeuLink.reconcile(preferences, with: live) {
+            logCollector.add(changed, source: .system)
+        }
+        logCollector.add(
+            "Installing the PsyNeuLink in use (\(live.description)), kept from the previous environment.",
+            source: .system)
+        return live.pipArgs
+    }
+
+    /// Where PsyNeuLink comes from, for About and the self-check: the live
+    /// install when it can be read (#9), else the app's record.
+    func livePsyNeuLinkDescription() -> String {
+        reconcilePsyNeuLinkRecord(repoPath: appState.repoPath ?? preferences.repoPath)
+        return preferences.pnlSourceDescription
+    }
+
+    /// Bring the app's PsyNeuLink record in step with the environment at
+    /// `repoPath` (#9). Called at every start and by the page after a switch.
+    @discardableResult
+    func reconcilePsyNeuLinkRecord(repoPath: URL?) -> String? {
+        guard let live = LivePsyNeuLink.read(environmentOf: repoPath),
+              let changed = LivePsyNeuLink.reconcile(preferences, with: live) else { return nil }
+        logCollector.add(changed, source: .system)
+        return changed
+    }
+
     /// Why preparing the included PsyNeuView failed, for the log and the user.
     struct PrepareFailure: Error {
         let message: String
@@ -1933,8 +1980,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             installer.onDetail = { [weak self] step, detail in
                 self?.startupProgress?.note(detail, under: ProgressStep(step))
             }
+            // Install the PsyNeuLink that is actually in use in the environment
+            // being left, not the app's record of what it was set up with: a
+            // switch made in the page's Settings never reached that record, and
+            // building from it moved people off their own checkout (#9).
+            let pipArgs = pnlPipArgsKeepingLiveSource(leaving: preferences.repoPath)
             let built = await installer.repairEnvironment(
-                repoPath: tree, pnlPipArgs: preferences.pnlPipArgs)
+                repoPath: tree, pnlPipArgs: pipArgs)
             guard built, BundledPsyNeuView.hasUsableEnvironment(at: tree) else {
                 return .failure(PrepareFailure(message: "installing its Python packages failed"))
             }
