@@ -184,6 +184,27 @@ final class ProblemReportTests: XCTestCase {
             ProblemReport.redact("/Users/someoneelse/x", home: Self.home), "/Users/someoneelse/x")
     }
 
+    func testTheHomeFolderIsHiddenInEncodedForms() {
+        // Request URLs in the backend log carry it percent-encoded (#2).
+        XCTAssertEqual(
+            ProblemReport.redact("GET /api/model/edit-mode?file_path=%2FUsers%2Fsomeone%2FLibrary%2Fx", home: Self.home),
+            "GET /api/model/edit-mode?file_path=~%2FLibrary%2Fx")
+        XCTAssertEqual(ProblemReport.redact("p=%2fUsers%2fsomeone%2fx", home: Self.home), "p=~%2fx")
+        // JSON-escaped.
+        XCTAssertEqual(ProblemReport.redact(#"{"path":"\/Users\/someone\/x"}"#, home: Self.home), #"{"path":"~\/x"}"#)
+        // A space in the home folder, encoded as %20 or +.
+        XCTAssertEqual(ProblemReport.redact("%2FUsers%2Fsome%20one%2Fx", home: "/Users/some one"), "~%2Fx")
+        XCTAssertEqual(ProblemReport.redact("%2FUsers%2Fsome+one%2Fx", home: "/Users/some one"), "~%2Fx")
+        // Another account stays, encoded or not.
+        XCTAssertEqual(ProblemReport.redact("%2FUsers%2Fsomeoneelse%2Fx", home: Self.home), "%2FUsers%2Fsomeoneelse%2Fx")
+    }
+
+    func testTheAccountsUsersFolderIsHiddenWhenHomeIsElsewhere() {
+        XCTAssertEqual(
+            ProblemReport.shortenHome("/Users/someone/x and %2FUsers%2Fsomeone%2Fy", home: "/private/var/home", userName: "someone"),
+            "~/x and ~%2Fy")
+    }
+
     func testEverythingThatLeavesIsRedacted() throws {
         var r = request(
             what: "Saw ghp_abcdefghijklmnopqrstuvwxyz0123 in /Users/someone/code",

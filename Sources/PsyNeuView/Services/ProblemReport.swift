@@ -165,24 +165,47 @@ enum ProblemReport {
     }()
 
     /// Remove secrets, and show the home folder as `~`.
-    static func redact(_ text: String, home: String = NSHomeDirectory()) -> String {
+    static func redact(_ text: String, home: String = NSHomeDirectory(), userName: String = NSUserName()) -> String {
         var s = text
         for (regex, template) in secretPatterns {
             s = regex.stringByReplacingMatches(
                 in: s, range: NSRange(s.startIndex..., in: s), withTemplate: template)
         }
-        return shortenHome(s, home: home)
+        return shortenHome(s, home: home, userName: userName)
     }
 
     /// `/Users/someone/x` → `~/x`, only at a path boundary, so
     /// `/Users/someoneelse` is left alone.
-    static func shortenHome(_ text: String, home: String) -> String {
-        let trimmed = home.hasSuffix("/") ? String(home.dropLast()) : home
-        guard trimmed.count > 1 else { return text }
-        let pattern = NSRegularExpression.escapedPattern(for: trimmed) + #"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        return regex.stringByReplacingMatches(
-            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "~")
+    ///
+    /// Also the forms the home folder takes in logs (#2): percent-encoded in
+    /// request URLs (`%2FUsers%2Fsomeone`, either case, `%20` or `+` for a
+    /// space), JSON-escaped (`\/Users\/someone`), and `/Users/<account>` when
+    /// the home folder is somewhere else.
+    static func shortenHome(_ text: String, home: String, userName: String = NSUserName()) -> String {
+        var homes: [String] = []
+        for candidate in [home, userName.isEmpty ? "" : "/Users/" + userName] {
+            let trimmed = candidate.hasSuffix("/") ? String(candidate.dropLast()) : candidate
+            if trimmed.count > 1, !homes.contains(trimmed) { homes.append(trimmed) }
+        }
+        let boundary = #"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])"#
+        var s = text
+        for h in homes {
+            let plain = NSRegularExpression.escapedPattern(for: h)
+            let json = NSRegularExpression.escapedPattern(for: h.replacingOccurrences(of: "/", with: #"\/"#))
+            // Percent-encoded: "/" may be %2F or %2f; a space %20 or "+".
+            let encoded = h.map { ch -> String in
+                switch ch {
+                case "/": return "%2[Ff]"
+                case " ": return "(?:%20|\\+)"
+                default: return NSRegularExpression.escapedPattern(for: String(ch))
+                }
+            }.joined()
+            for pattern in [plain, json, encoded] {
+                guard let regex = try? NSRegularExpression(pattern: pattern + boundary) else { continue }
+                s = regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "~")
+            }
+        }
+        return s
     }
 
     // MARK: Logs
