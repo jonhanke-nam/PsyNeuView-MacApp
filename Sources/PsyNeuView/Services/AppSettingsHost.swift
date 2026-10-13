@@ -14,6 +14,11 @@ final class AppSettingsHost: SettingsBridgeHost {
     /// Stops PsyNeuView, switches to the chosen install and starts it. The
     /// services belong to the app delegate, so it does this.
     var onSwitchInstall: ((InstallSwitch.Decision) -> Void)?
+    /// The app update Sparkle last found (#6); the app delegate keeps it
+    /// current and posts `SettingsBridge.didChange` when it changes.
+    var foundAppUpdate: AppUpdateWatch.Found?
+    /// Opens Sparkle's update window. The updater belongs to the app delegate.
+    var onInstallAppUpdate: (() -> Void)?
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -94,6 +99,14 @@ final class AppSettingsHost: SettingsBridgeHost {
             current: current.map(InstallSwitch.facts(at:)),
             archiveVersion: archiveVersion,
             target: target)
+    }
+
+    func appUpdate() -> [String: Any] {
+        AppUpdateWatch.bridgeValue(running: AppUpdateWatch.runningVersion, found: foundAppUpdate)
+    }
+
+    func installAppUpdate() {
+        onInstallAppUpdate?()
     }
 
     func switchInstall(_ decision: InstallSwitch.Decision) {
