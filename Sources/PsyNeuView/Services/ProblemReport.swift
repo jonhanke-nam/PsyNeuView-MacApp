@@ -613,18 +613,49 @@ enum ProblemReport {
             truncationNote: "_(Cut to fit a GitHub link. The full report is in \(r.reference).)_")
     }
 
-    /// Gmail's web compose, with the summary and a note to attach the folder.
-    /// A link can't attach files.
+    /// The first line of a report sent by a link or a fallback that can't
+    /// attach files (#5). First, not last, so it's read and survives a cut.
+    static func attachRequest(_ r: Request) -> String {
+        "Please attach \(r.reference).zip before sending (it's selected in Finder, in your Downloads "
+            + "folder). Without it the report has no logs or screenshot."
+    }
+
+    /// Kept for the Gmail callers and tests.
+    static func gmailAttachRequest(_ r: Request) -> String { attachRequest(r) }
+
+    private static func linkBody(_ r: Request, home: String) -> String {
+        attachRequest(r) + "\n\n" + summary(r, home: home)
+    }
+
+    private static func cutNote(_ r: Request) -> String {
+        "(Cut to fit a link. Please attach \(r.reference).zip from Downloads.)"
+    }
+
+    /// Gmail's web compose: the attach request first, then the summary.
     static func gmailURL(_ r: Request, to: String, home: String = NSHomeDirectory(),
                          maxLength: Int = maxURLLength) -> URL? {
-        let body = summary(r, home: home)
-            + "\n\nPlease attach the folder \(r.reference) from your Downloads folder "
-            + "(or \(r.reference).zip beside it) before sending."
-        return link(
+        link(
             "https://mail.google.com/mail/",
-            fields: [("view", "cm"), ("fs", "1"), ("to", to), ("su", emailSubject(r)), ("body", body)],
-            maxLength: maxLength,
-            truncationNote: "(Cut to fit a link. Please attach the folder \(r.reference) from Downloads.)")
+            fields: [("view", "cm"), ("fs", "1"), ("to", to), ("su", emailSubject(r)), ("body", linkBody(r, home: home))],
+            maxLength: maxLength, truncationNote: cutNote(r))
+    }
+
+    /// Outlook on the web's compose page, prefilled the same way.
+    static func outlookWebURL(_ r: Request, to: String, home: String = NSHomeDirectory(),
+                              maxLength: Int = maxURLLength) -> URL? {
+        link(
+            "https://outlook.office.com/mail/deeplink/compose",
+            fields: [("to", to), ("subject", emailSubject(r)), ("body", linkBody(r, home: home))],
+            maxLength: maxLength, truncationNote: cutNote(r))
+    }
+
+    /// A mailto link, for opening Outlook when it isn't the default mail app.
+    static func mailtoURL(_ r: Request, to: String, home: String = NSHomeDirectory(),
+                          maxLength: Int = maxURLLength) -> URL? {
+        link(
+            "mailto:" + to,
+            fields: [("subject", emailSubject(r)), ("body", linkBody(r, home: home))],
+            maxLength: maxLength, truncationNote: cutNote(r))
     }
 
     static func emailSubject(_ r: Request) -> String {
@@ -655,7 +686,38 @@ enum ProblemReport {
     }
 
     enum Route: Equatable {
-        case share, email, gmail
+        /// The share sheet. The file is handed over, but the target (a chat,
+        /// a browser) may not keep it, so it's checked by hand.
+        case share
+        /// The default mail app, with the report attached by macOS.
+        case email
+        /// Gmail's web compose: a link, so no attachment.
+        case gmail
+        /// Outlook when it isn't the default mail app: opened on a mailto
+        /// link, which can't carry an attachment.
+        case outlookApp
+        /// Outlook on the web: a link, so no attachment.
+        case outlookWeb
+    }
+
+    /// What the window asks of the sender after a route is used (#5).
+    enum AttachReminder: Equatable {
+        case none
+        /// Attached automatically: a short "check it's attached" line.
+        case check
+        /// Not attached: the file is selected in Finder and the window asks
+        /// until the sender says it's done.
+        case required
+    }
+
+    /// Which reminder a route needs. Only a mail app opened by macOS's
+    /// sharing service attaches the file itself; every link and fallback
+    /// needs the sender to attach it.
+    static func attachReminder(after route: Route, setup: MailSetup) -> AttachReminder {
+        switch route {
+        case .email: return setup.defaultMailApp == nil ? .required : .check
+        case .gmail, .outlookApp, .outlookWeb, .share: return .required
+        }
     }
 
     /// What this Mac can send with.
@@ -697,10 +759,18 @@ enum ProblemReport {
             if setup.defaultIsOutlook {
                 return SendPlan(preferred: .email, emailAvailable: true, notice: nil)
             }
-            let why = setup.outlookInstalled
-                ? "Outlook isn't your default mail app, so the report can't be attached there automatically."
-                : "Reports are set to go by Outlook, but Outlook isn't installed on this Mac."
-            return SendPlan(preferred: nil, emailAvailable: hasMail, notice: why + fallback)
+            // Outlook without automatic attaching (#5): open it anyway (the
+            // app on a mailto link, or Outlook on the web) and have the sender
+            // attach the file, which is selected in Finder.
+            let attach = " Outlook opens with the message; drag the report's file in from Finder."
+            if setup.outlookInstalled {
+                return SendPlan(
+                    preferred: .outlookApp, emailAvailable: hasMail,
+                    notice: "Outlook isn't your default mail app, so the report can't be attached there automatically." + attach)
+            }
+            return SendPlan(
+                preferred: .outlookWeb, emailAvailable: hasMail,
+                notice: "Reports are set to go by Outlook, but Outlook isn't installed on this Mac, so Outlook on the web is used." + attach)
         case .gmail:
             return SendPlan(preferred: .gmail, emailAvailable: hasMail, notice: nil)
         }

@@ -334,7 +334,18 @@ final class ProblemReportTests: XCTestCase {
         XCTAssertEqual(value("view"), "cm")
         XCTAssertEqual(value("to"), "help@example.org")
         XCTAssertEqual(value("su"), "PsyNeuView problem report PNV-debugging-2026-10-06_14-03-22")
-        XCTAssertTrue(value("body")?.contains("Please attach the folder PNV-debugging-2026-10-06_14-03-22 from your Downloads folder") ?? false)
+        // A link can't attach files (#5): the request to attach is the first line.
+        XCTAssertTrue(value("body")?.hasPrefix("Please attach PNV-debugging-2026-10-06_14-03-22.zip before sending") ?? false)
+    }
+
+    func testTheGmailAttachRequestSurvivesACut() throws {
+        // A long report is cut to fit the link; the cut is at the end, so the
+        // attach request, now first, is always kept (#5).
+        let url = try XCTUnwrap(ProblemReport.gmailURL(request(), to: "help@example.org", home: Self.home, maxLength: 700))
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        let body = try XCTUnwrap(items.first { $0.name == "body" }?.value)
+        XCTAssertTrue(body.hasPrefix(ProblemReport.gmailAttachRequest(request())))
+        XCTAssertLessThanOrEqual(url.absoluteString.count, 700)
     }
 
     func testTheInstructionsNameTheContact() {
@@ -365,11 +376,53 @@ final class ProblemReportTests: XCTestCase {
         XCTAssertTrue(P.sendPlan(.mail, setup: none).notice?.contains("no mail app") ?? false)
 
         XCTAssertEqual(P.sendPlan(.outlook, setup: outlook).preferred, .email)
-        XCTAssertNil(P.sendPlan(.outlook, setup: outlookNotDefault).preferred)
+        // Outlook that can't attach automatically still opens, and says to drag the file in (#5).
+        XCTAssertEqual(P.sendPlan(.outlook, setup: outlookNotDefault).preferred, .outlookApp)
         XCTAssertTrue(P.sendPlan(.outlook, setup: outlookNotDefault).notice?.contains("isn't your default") ?? false)
+        XCTAssertTrue(P.sendPlan(.outlook, setup: outlookNotDefault).notice?.contains("drag the report's file in") ?? false)
+        XCTAssertEqual(P.sendPlan(.outlook, setup: none).preferred, .outlookWeb)
         XCTAssertTrue(P.sendPlan(.outlook, setup: none).notice?.contains("isn't installed") ?? false)
 
         XCTAssertEqual(P.sendPlan(.gmail, setup: none).preferred, .gmail)
         XCTAssertEqual(P.SendWith(setting: "nonsense"), .ask)
+    }
+
+    // MARK: Attach reminders (#5)
+
+    func testEachRouteGetsTheRightAttachReminder() {
+        typealias P = ProblemReport
+        let mail = P.MailSetup(defaultMailApp: "com.apple.mail", outlookInstalled: false)
+        let outlook = P.MailSetup(defaultMailApp: "com.microsoft.Outlook", outlookInstalled: true)
+        let outlookNotDefault = P.MailSetup(defaultMailApp: "com.apple.mail", outlookInstalled: true)
+        let none = P.MailSetup(defaultMailApp: nil, outlookInstalled: false)
+
+        // Attached automatically by the default mail app: a short check only.
+        XCTAssertEqual(P.attachReminder(after: .email, setup: mail), .check)
+        XCTAssertEqual(P.attachReminder(after: .email, setup: outlook), .check)
+        // No mail app to attach it: the sender must.
+        XCTAssertEqual(P.attachReminder(after: .email, setup: none), .required)
+        // Links and fallbacks never attach: the blocking step, whatever the setup.
+        for setup in [mail, outlook, outlookNotDefault, none] {
+            XCTAssertEqual(P.attachReminder(after: .gmail, setup: setup), .required)
+            XCTAssertEqual(P.attachReminder(after: .outlookWeb, setup: setup), .required)
+            XCTAssertEqual(P.attachReminder(after: .outlookApp, setup: setup), .required)
+            XCTAssertEqual(P.attachReminder(after: .share, setup: setup), .required)
+        }
+    }
+
+    func testOutlookLinksPutTheAttachRequestFirst() throws {
+        typealias P = ProblemReport
+        let ask = P.attachRequest(request())
+        let web = try XCTUnwrap(P.outlookWebURL(request(), to: "help@example.org", home: Self.home))
+        XCTAssertEqual(web.host, "outlook.office.com")
+        let webItems = try XCTUnwrap(URLComponents(url: web, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(webItems.first { $0.name == "to" }?.value, "help@example.org")
+        XCTAssertTrue(webItems.first { $0.name == "body" }?.value?.hasPrefix(ask) ?? false)
+
+        let mailto = try XCTUnwrap(P.mailtoURL(request(), to: "help@example.org", home: Self.home))
+        XCTAssertEqual(mailto.scheme, "mailto")
+        let mailItems = try XCTUnwrap(URLComponents(url: mailto, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(mailItems.first { $0.name == "subject" }?.value, P.emailSubject(request()))
+        XCTAssertTrue(mailItems.first { $0.name == "body" }?.value?.hasPrefix(ask) ?? false)
     }
 }
