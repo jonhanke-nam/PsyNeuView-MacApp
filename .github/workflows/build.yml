@@ -1,0 +1,73 @@
+name: Build
+
+# Compile-check on the same runner the release workflow uses, so a build that
+# fails to compile on CI (e.g. Swift concurrency errors the local toolchain
+# doesn't flag) is caught on every push/PR — not only when cutting a release
+# (#37). Fast feedback: build only, no signing/notarization.
+on:
+  push:
+    branches: [jonhanke-devel, main]
+  pull_request:
+    branches: [jonhanke-devel]
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: swift build (release config)
+        run: swift build -c release
+      - name: swift test
+        run: swift test
+
+      # The parsing pnv-status relies on, against fixed inputs (#209).
+      - name: pnv-status self-test
+        run: ./scripts/pnv-status --self-test
+
+      # Measure how long the app takes to start, and fail if it is creeping
+      # toward the ceiling (#104).
+      #
+      # 0.5.3 shipped a 30s ceiling against a 38.67s warm-up and nothing
+      # objected: the tests compared one constant to another, and every
+      # development machine had PsyNeuLink already imported.
+      #
+      # Needs the bundle the step above staged, so it runs after it and is
+      # skipped when that was skipped. The threshold is a fraction of the
+      # ceiling, not a number of seconds: a runner is not a cold Mac, and what
+      # transfers between machines is the ratio.
+      - name: measure startup time
+        env:
+          GH_TOKEN: ${{ secrets.PSYNEUVIEW_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::notice::no bundle staged — skipping the startup measurement."
+            exit 0
+          fi
+          if [ ! -x .build/PsyNeuView.app/Contents/MacOS/PsyNeuView ]; then
+            echo "::notice::no app bundle — skipping the startup measurement."
+            exit 0
+          fi
+          ./scripts/measure-boot.sh 0.25
+
+      # The fast half of the bundled-install check (#45). Catches a staged tree
+      # that the app could not start from — which is how 0.5.0 shipped unusable.
+      # PsyNeuView is public, so the workflow's own token is enough and this
+      # runs on every PR, forks included. The empty-token guard below stays as
+      # a safety net.
+      - name: verify bundled install (quick)
+        env:
+          GH_TOKEN: ${{ secrets.PSYNEUVIEW_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::notice::PSYNEUVIEW_REPO_TOKEN unavailable — skipping the bundled-install check."
+            exit 0
+          fi
+          make python-runtime
+          make psyneuview-bundle
+          # uv too, or this checks the pip fallback rather than what ships. (#94)
+          make uv-runtime
+          ./scripts/verify-bundled-install.sh --quick

@@ -1,0 +1,306 @@
+name: Release
+
+# Tag-push trigger: pushing a tag matching v*.*.* (e.g. v0.5.0) cuts a full
+# release — build, sign, notarize, attach DMG to a GitHub Release, sign and
+# publish the Sparkle appcast. Local `Scripts/release.sh` still works for
+# users with the right Keychain entries; this workflow takes over once
+# secrets are configured on the repo.
+#
+# Every gate runs before anything is signed or published (#174): the app's own
+# tests, a check that the bundled PsyNeuView passed its full suites, a real
+# install from the bundle, and launching the signed app. A release reaches users
+# who can't work around a broken build, so none of these is optional.
+#
+# Run it by hand (Actions > Release > Run workflow) for a dry run: the same
+# gates on the current branch, with an unsigned app, and nothing published.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Annotated tag objects are not fetched by default, so the tag name
+          # resolves to a commit and `git tag -l --format=%(contents)` returns
+          # the commit message. 0.5.5 shipped with "Merge pull request #112" as
+          # its release notes because of exactly that.
+          #
+          # fetch-depth alone is not enough, which 0.5.6 proved: on a tag push
+          # checkout writes a lightweight tag at the commit, so `git cat-file -t`
+          # still says "commit" and tag-notes.sh refuses. fetch-tags brings the
+          # real objects.
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Belt and braces: re-fetch this tag's object explicitly and prove it is
+      # annotated before anything is built, signed or published. A release that
+      # is going to fail on its notes should fail in the first ten seconds, not
+      # after notarization with a published, empty release left behind.
+      - name: The tag must be annotated
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          TYPE="$(git cat-file -t "${TAG}")"
+          if [ "${TYPE}" != "tag" ]; then
+            echo "::error::${TAG} is not an annotated tag (got '${TYPE}'). Release" \
+                 "notes come from the tag message — re-create it with 'git tag -a'."
+            exit 1
+          fi
+          echo "${TAG} is annotated. Notes preview:"
+          ./scripts/tag-notes.sh "${TAG}" | head -5
+
+      - name: Verify tag matches Info.plist version
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          TAG="${GITHUB_REF#refs/tags/}"
+          # A dry run has no tag; it checks everything else.
+          [ "${GITHUB_EVENT_NAME}" = "push" ] || TAG="v$VERSION"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag $TAG does not match Info.plist version v$VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "dmg=PsyNeuView-${VERSION}.dmg" >> "$GITHUB_OUTPUT"
+
+      # The app's own tests. They ran on the PR that last changed the code, but
+      # a release is built from exactly this commit, so it is tested exactly
+      # here (#174).
+      - name: swift test
+        run: |
+          swift build -c release
+          swift test
+
+      # The app is only as good as the PsyNeuView inside it, and its tests
+      # say nothing about that code. Refuse a pinned PsyNeuView that isn't on
+      # devel or didn't pass every suite there (#174).
+      - name: The bundled PsyNeuView passed its full checks
+        env:
+          GH_TOKEN: ${{ secrets.PSYNEUVIEW_REPO_TOKEN || github.token }}
+        run: ./scripts/check-psyneuview-tested.sh
+
+      - name: Import Developer ID certificate
+        if: github.event_name == 'push'
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH" >/dev/null
+
+          # Put the build keychain ahead of login.keychain in the search list
+          # so `security find-identity` (used by sign-app.sh) can see the cert.
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          rm -f "$CERT_PATH"
+
+      # Staged in its own step so a failure here reads as "couldn't fetch
+      # PsyNeuView" rather than a confusing signing error. fetch-psyneuview.sh is
+      # idempotent, so the later `make sign` finds the archive already present.
+      - name: Stage bundled PsyNeuView and Python runtime
+        env:
+          GH_TOKEN: ${{ secrets.PSYNEUVIEW_REPO_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          # PsyNeuView is public: the workflow's own token is enough (it only
+          # raises the API rate limit). PSYNEUVIEW_REPO_TOKEN is optional.
+          make python-runtime
+          make psyneuview-bundle
+          # uv too, or the gate below exercises the pip fallback rather than the
+          # path that actually ships: `make app` fetches uv later, so the DMG has
+          # it while the verification did not. A gate that tests a different
+          # configuration from the release is worth very little. (#94, #45)
+          make uv-runtime
+
+      # The gate 0.5.0 lacked. Runs the whole install — venv from the bundled
+      # interpreter, real dependency install, imports under the hardened runtime,
+      # backend answering /health — before anything is signed or published, so a
+      # bundle that cannot run never reaches the download page. (#45)
+      - name: Verify the bundled install actually runs
+        run: ./scripts/verify-bundled-install.sh
+
+      - name: Build, sign, and create DMG
+        if: github.event_name == 'push'
+        run: |
+          make sign
+          # NOT `make dmg`: the `dmg` target re-runs the phony `app` target,
+          # which `rm -rf`s and re-assembles PsyNeuView.app UNSIGNED, wiping the
+          # signature we just applied. Call create-dmg.sh directly so the DMG
+          # packages the signed app (mirrors local `make signed-dmg`). (#37)
+          ./scripts/create-dmg.sh
+
+      # A dry run has no signing identity; build the same app unsigned so the
+      # launch check below still has something real to start.
+      - name: Build the app (dry run, unsigned)
+        if: github.event_name != 'push'
+        run: make app
+
+      # Start the built app itself and wait for it to report a finished boot,
+      # the way a user's first launch does. The install check above runs the
+      # bundle's pieces; this runs the app that ships (#174).
+      - name: The built app launches
+        # A fresh runner has never been set up, so this first launch installs
+        # the bundled PsyNeuView before it boots (#174): minutes, not seconds.
+        env:
+          BOOT_TIMEOUT: "900"
+        run: ./scripts/measure-boot.sh 0.25
+
+      # The first launch step by step — unpacking, the environment, each phase
+      # of the package install, the server — kept with the release so the
+      # time can't grow unnoticed (#215). measure-boot.sh has already compared
+      # it with scripts/boot-baseline.json and warned about any step more than
+      # 25% slower; docs/startup-time.md says what each step is tied to.
+      - name: Keep the first-launch breakdown
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-launch-breakdown
+          path: .build/boot-breakdown.json
+          if-no-files-found: ignore
+
+      # An app update has to bring its PsyNeuView into use. Until #186 every
+      # bundled user kept the version they first installed. This plants an
+      # older install, launches again, and requires the app to move by itself.
+      - name: An older install moves to this PsyNeuView
+        env:
+          BOOT_TIMEOUT: "900"
+        run: ./scripts/check-bundle-upgrade.sh 0.25
+
+      # And a user's edits have to survive that move. Until PsyNeuView-archive#1319 a
+      # working copy of a Reference Model lived in the install's own backend/,
+      # so an update reopened the pristine model. This plants an edit under the
+      # old rule beside a fresh unpack of the bundle and requires the new
+      # install to carry it over (#217). Reuses the environment the first
+      # launch built above, so it costs boots, not another install. Skips
+      # itself, with a notice, while the pinned PsyNeuView predates #1319.
+      - name: Edits to included models survive the move
+        run: |
+          set -euo pipefail
+          CURRENT="$(defaults read com.psyneuview.macapp repoPath 2>/dev/null || true)"
+          ./scripts/check-working-copies-survive.sh --venv "${CURRENT}/backend/.venv"
+
+      - name: Notarize and staple DMG
+        if: github.event_name == 'push'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: ./scripts/notarize-dmg.sh
+
+      - name: Sign and publish Sparkle appcast
+        if: github.event_name == 'push'
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Auto-update publishing is optional: without the Sparkle signing key
+          # and a releases-repo token the core release (signed+notarized DMG
+          # attached to a GitHub Release) still ships — we just skip updating the
+          # appcast so existing installs don't auto-offer this version yet (#22).
+          if [ -z "${SPARKLE_EDDSA_PRIVATE_KEY}" ] || [ -z "${RELEASES_REPO_TOKEN}" ]; then
+            echo "::warning::SPARKLE_EDDSA_PRIVATE_KEY / RELEASES_REPO_TOKEN not set — skipping Sparkle appcast publish. The signed+notarized DMG is still attached to the GitHub Release."
+            exit 0
+          fi
+          KEY_FILE="$RUNNER_TEMP/sparkle_eddsa.key"
+          printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          export SPARKLE_PRIVATE_KEY_FILE="$KEY_FILE"
+          export RELEASES_REPO_URL="https://x-access-token:${RELEASES_REPO_TOKEN}@github.com/jonhanke-nam/PsyNeuView-releases.git"
+          ./scripts/update-appcast.sh
+
+          rm -f "$KEY_FILE"
+
+      - name: Create GitHub Release with DMG
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" --clobber
+          else
+            ./scripts/tag-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+            # The tag's first line is the headline. tag-notes.sh strips it from
+            # the body on the grounds that GitHub shows it as the title, so the
+            # title has to actually be it -- otherwise the line is written and
+            # then thrown away, which is what happened through 0.5.12 (#158).
+            TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+            [ -n "$TITLE" ] || TITLE="PsyNeuView ${VERSION}"
+            gh release create "$TAG" "$DMG" \
+              --title "$TITLE" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+      - name: Regenerate the public changelog
+        if: github.event_name == 'push'
+        env:
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -uo pipefail
+          # The releases page is the record; this mirrors it into one file you
+          # can read end to end, grep, and open offline. Derived, so it cannot
+          # drift the way the hand-maintained changelog did (#161).
+          #
+          # Best-effort throughout: the release is already published by now, and
+          # a changelog problem must not fail a release that shipped fine.
+          if [ -z "${RELEASES_REPO_TOKEN:-}" ]; then
+            echo "::warning::RELEASES_REPO_TOKEN not set — skipping changelog regeneration."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${RELEASES_REPO_TOKEN}@github.com/jonhanke-nam/PsyNeuView-releases.git" \
+            "$RUNNER_TEMP/releases-repo" || { echo "::warning::clone failed"; exit 0; }
+          ./scripts/generate-changelog.sh "$RUNNER_TEMP/releases-repo/CHANGELOG.md" \
+            || { echo "::warning::generation failed"; exit 0; }
+          cd "$RUNNER_TEMP/releases-repo"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "changelog unchanged"
+            exit 0
+          fi
+          git commit -m "Regenerate CHANGELOG.md for ${TAG}"
+          git push || echo "::warning::could not push CHANGELOG.md; run scripts/generate-changelog.sh manually"

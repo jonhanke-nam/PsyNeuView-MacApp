@@ -1,0 +1,124 @@
+{
+  "note": "The first-launch breakdown a release is compared with (#215). Measured by scripts/profile-first-launch.sh --cold: every wheel downloaded, nothing cached, on the machine named below. Refresh from a release run's first-launch-breakdown artifact (or a new --cold profile) when the install changes on purpose; docs/startup-time.md says what each step is tied to.",
+  "measuredAt": "2026-10-09T06:23:04Z",
+  "source": "profile-first-launch.sh --cold",
+  "machine": {
+    "model": "Mac16,5",
+    "macOS": "26.6.2",
+    "cpuCores": "14",
+    "chip": "Apple M4 Max"
+  },
+  "psyneuview": "0.5.13",
+  "psyneulink": {
+    "source": "git+https://github.com/PrincetonUniversity/PsyNeuLink.git@devel",
+    "version": "0.20.2.0+264.g3c067c767"
+  },
+  "caches": "cold",
+  "totalSeconds": 63.314,
+  "downloadedBytes": null,
+  "largestWheels": [],
+  "steps": [
+    {
+      "id": "getPsyNeuView",
+      "title": "Install PsyNeuView",
+      "seconds": 0.178,
+      "bytes": null
+    },
+    {
+      "id": "createEnvironment",
+      "title": "Create the Python environment",
+      "seconds": 1.227,
+      "bytes": null
+    },
+    {
+      "id": "installPackages",
+      "title": "Install PsyNeuLink and Python packages",
+      "seconds": 22.061,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/psyneulink/resolve",
+      "title": "PsyNeuLink (git+https://github.com/PrincetonUniversity/PsyNeuLink.git@devel) with uv: resolve dependencies",
+      "seconds": 11.22,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/psyneulink/prepare",
+      "title": "PsyNeuLink (git+https://github.com/PrincetonUniversity/PsyNeuLink.git@devel) with uv: download and prepare packages",
+      "seconds": 8.35,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/psyneulink/install",
+      "title": "PsyNeuLink (git+https://github.com/PrincetonUniversity/PsyNeuLink.git@devel) with uv: install the packages",
+      "seconds": 0.944,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/psyneulink/total",
+      "title": "PsyNeuLink (git+https://github.com/PrincetonUniversity/PsyNeuLink.git@devel) with uv: total",
+      "seconds": 20.763,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/backend/resolve",
+      "title": "Backend packages with uv: resolve dependencies",
+      "seconds": 0.379,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/backend/prepare",
+      "title": "Backend packages with uv: download and prepare packages",
+      "seconds": 0.755,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/backend/install",
+      "title": "Backend packages with uv: install the packages",
+      "seconds": 0.014,
+      "bytes": null
+    },
+    {
+      "id": "installPackages/backend/total",
+      "title": "Backend packages with uv: total",
+      "seconds": 1.273,
+      "bytes": null
+    },
+    {
+      "id": "prepareFastStart",
+      "title": "Preparing Python for a fast first start",
+      "seconds": 15.351,
+      "bytes": null
+    },
+    {
+      "id": "prepareFastStart/compileBytecode",
+      "title": "Compiling Python bytecode",
+      "seconds": 4.258,
+      "bytes": null
+    },
+    {
+      "id": "prepareFastStart/fontCache",
+      "title": "Building matplotlib's font cache",
+      "seconds": 11.059,
+      "bytes": null
+    },
+    {
+      "id": "startServer",
+      "title": "Start the server and load PsyNeuLink",
+      "seconds": 23.777,
+      "bytes": null
+    },
+    {
+      "id": "startServer/health",
+      "title": "Server answered /health",
+      "seconds": 23.777,
+      "bytes": null
+    },
+    {
+      "id": "firstModelLoad",
+      "title": "First model load (imports PsyNeuLink)",
+      "seconds": 0.72,
+      "bytes": null
+    }
+  ]
+}

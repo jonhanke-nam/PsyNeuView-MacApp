@@ -1,0 +1,426 @@
+#!/bin/bash
+#
+# pnv-status — every PsyNeuView running on this Mac (#209).
+#
+#     scripts/pnv-status              list them
+#     scripts/pnv-status --stop PID   stop one (asks first; --yes skips the question)
+#     scripts/pnv-status --self-test  check the parsing this script relies on
+#
+# Lists, in order: Mac apps (real app, test app, a `swift run` build), backends
+# (uvicorn: port, PsyNeuView version from /openapi.json, folder, start time,
+# which app launched it), development servers (vite) and containers (podman
+# or docker, when installed). On 2026-10-07 three forgotten servers were
+# running and nobody could tell them apart; this is the answer to "what is
+# running, and which one is that window?".
+#
+# Needs only what macOS ships: ps, lsof, curl, PlistBuddy. Keep it
+# shellcheck-clean (`shellcheck scripts/pnv-status`).
+set -euo pipefail
+
+REAL_BUNDLE_ID="com.psyneuview.macapp"
+TEST_BUNDLE_ID="com.psyneuview.macapp.test"
+PB=/usr/libexec/PlistBuddy
+
+# ── Pure pieces ───────────────────────────────────────────────────────
+# Each takes its input as arguments and prints its answer; --self-test
+# exercises them with fixed inputs.
+
+# "real app", "test app" or "other" from a bundle id.
+flavor_from_bundle_id() {
+    case "${1:-}" in
+        "${TEST_BUNDLE_ID}") echo "test app" ;;
+        "${REAL_BUNDLE_ID}") echo "real app" ;;
+        *) echo "other" ;;
+    esac
+}
+
+# The .app bundle path from a process command line, or nothing when the
+# command is not inside a bundle (a `swift run` build).
+app_path_from_command() {
+    local cmd="${1:-}"
+    case "${cmd}" in
+        *.app/Contents/MacOS/*) printf '%s\n' "${cmd%%.app/Contents/MacOS/*}.app" ;;
+        *) printf '\n' ;;
+    esac
+}
+
+# The value of `--port N` in a command line, or nothing.
+port_from_command() {
+    local cmd="${1:-}"
+    # shellcheck disable=SC2001  # a regex with a capture; not a plain substitution
+    sed -n 's/.*--port[= ]\{1,\}\([0-9]\{1,\}\).*/\1/p' <<< "${cmd}" | head -n 1
+}
+
+# info.version from an /openapi.json body: the first "version" inside the
+# "info" object, never one from a schema further down.
+version_from_openapi() {
+    local body="${1:-}"
+    local info
+    info="$(sed -n 's/.*"info" *: *{\([^}]*\)}.*/\1/p' <<< "${body}" | head -n 1)"
+    sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' <<< "${info}" | head -n 1
+}
+
+# info.title from an /openapi.json body.
+title_from_openapi() {
+    local body="${1:-}"
+    local info
+    info="$(sed -n 's/.*"info" *: *{\([^}]*\)}.*/\1/p' <<< "${body}" | head -n 1)"
+    sed -n 's/.*"title" *: *"\([^"]*\)".*/\1/p' <<< "${info}" | head -n 1
+}
+
+# The value of an environment variable in `ps -E` output, or nothing.
+env_value_from_ps() {
+    local name="$1" line="${2:-}"
+    # Variables are separated by spaces; a value runs to the next space.
+    sed -n "s/.*[[:space:]]${name}=\([^[:space:]]*\).*/\1/p" <<< " ${line}" | head -n 1
+}
+
+# What kind of thing launched a backend, from its parent's command line.
+launcher_kind() {
+    local parent="${1:-}"
+    case "${parent}" in
+        *.app/Contents/MacOS/PsyNeuView*) echo "app" ;;
+        */.build/debug/PsyNeuView*|*/.build/release/PsyNeuView*) echo "swift run" ;;
+        make*|*/make*) echo "make" ;;
+        *bash*|*zsh*|*sh\ *|*/sh) echo "shell" ;;
+        "") echo "unknown" ;;
+        *) echo "other" ;;
+    esac
+}
+
+# ── Helpers over the live machine ─────────────────────────────────────
+
+# `pid ppid lstart(5 words) command…` for every process.
+all_processes() {
+    ps -axo pid=,ppid=,lstart=,command= 2>/dev/null || true
+}
+
+pid_of() { awk '{print $1}' <<< "$1"; }
+ppid_of() { awk '{print $2}' <<< "$1"; }
+started_of() { awk '{print $3, $4, $5, $6, $7}' <<< "$1"; }
+command_of() { cut -d' ' -f8- <<< "$(tr -s ' ' <<< "$1" | sed 's/^ *//')"; }
+
+command_for_pid() {
+    ps -o command= -p "$1" 2>/dev/null | head -n 1 || true
+}
+
+# cwd of a process we own; empty when lsof can't say.
+cwd_for_pid() {
+    lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true
+}
+
+# TCP ports a process is listening on, space-separated.
+listen_ports_for_pid() {
+    lsof -a -p "$1" -nP -iTCP -sTCP:LISTEN -Fn 2>/dev/null \
+        | sed -n 's/^n.*:\([0-9]*\)$/\1/p' | sort -un | tr '\n' ' ' | sed 's/ $//' || true
+}
+
+# One environment variable of a process we own (macOS `ps -E`).
+env_for_pid() {
+    local pid="$1" name="$2"
+    env_value_from_ps "${name}" "$(ps -E -o command= -p "${pid}" 2>/dev/null | head -n 1 || true)"
+}
+
+openapi_body() {
+    curl -s -m 2 "http://127.0.0.1:$1/openapi.json" 2>/dev/null || true
+}
+
+plist_value() {
+    "${PB}" -c "Print :$2" "$1" 2>/dev/null || true
+}
+
+home_abbrev() {
+    local p="${1:-}"
+    case "${p}" in
+        "${HOME}"/*) printf '~%s\n' "${p#"${HOME}"}" ;;
+        *) printf '%s\n' "${p}" ;;
+    esac
+}
+
+# ── Collectors ────────────────────────────────────────────────────────
+# Every collector appends "pid<TAB>kind<TAB>one-line description" to
+# $FOUND, so --stop can name what it is about to stop.
+FOUND=""
+remember() { FOUND+="$1	$2	$3"$'\n'; }
+
+# Backend pids already listed, so the port sweep doesn't list them twice.
+SEEN_BACKENDS=" "
+
+list_apps() {
+    echo "Mac apps"
+    local any=0 line pid cmd app plist bundle_id flavor version commit started
+    while IFS= read -r line; do
+        [ -n "${line}" ] || continue
+        cmd="$(command_of "${line}")"
+        case "${cmd}" in
+            *.app/Contents/MacOS/PsyNeuView|*.app/Contents/MacOS/PsyNeuView\ *) ;;
+            */.build/debug/PsyNeuView|*/.build/release/PsyNeuView) ;;
+            *) continue ;;
+        esac
+        any=1
+        pid="$(pid_of "${line}")"
+        started="$(started_of "${line}")"
+        app="$(app_path_from_command "${cmd}")"
+        if [ -n "${app}" ]; then
+            plist="${app}/Contents/Info.plist"
+            bundle_id="$(plist_value "${plist}" CFBundleIdentifier)"
+            flavor="$(flavor_from_bundle_id "${bundle_id}")"
+            version="$(plist_value "${plist}" CFBundleShortVersionString)"
+            commit="$(plist_value "${plist}" PNVBuildCommit)"
+            printf '  pid %-6s %-9s %s%s\n' "${pid}" "${flavor}" "${version:-?}" "${commit:+ (commit ${commit})}"
+            printf '             %s\n' "$(home_abbrev "${app}")"
+            remember "${pid}" "app" "${flavor} ${version:-?} at $(home_abbrev "${app}")"
+        else
+            flavor="swift run"
+            printf '  pid %-6s %-9s %s\n' "${pid}" "${flavor}" "$(home_abbrev "${cmd}")"
+            remember "${pid}" "app" "swift run build at $(home_abbrev "${cmd}")"
+        fi
+        printf '             since %s\n' "${started}"
+    done <<< "$(all_processes)"
+    [ "${any}" = 1 ] || echo "  (none)"
+    echo
+}
+
+describe_backend() {
+    local pid="$1" started="$2" cmd="$3"
+    local port version body cwd mode flavor parent kind launched
+    port="$(port_from_command "${cmd}")"
+    [ -n "${port}" ] || port="$(listen_ports_for_pid "${pid}" | awk '{print $1}')"
+    version=""
+    if [ -n "${port}" ]; then
+        body="$(openapi_body "${port}")"
+        version="$(version_from_openapi "${body}")"
+    fi
+    cwd="$(cwd_for_pid "${pid}")"
+    mode="$(env_for_pid "${pid}" PSYNEUVIEW_DEPLOYMENT_MODE)"
+    flavor="$(env_for_pid "${pid}" PSYNEUVIEW_APP_FLAVOR)"
+    parent="$(command_for_pid "$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')")"
+    kind="$(launcher_kind "${parent}")"
+    case "${kind}" in
+        app)
+            launched="$(flavor_from_bundle_id "$(plist_value "$(app_path_from_command "${parent}")/Contents/Info.plist" CFBundleIdentifier)")"
+            launched="launched by the ${launched} (pid $(ps -o ppid= -p "${pid}" | tr -d ' '))" ;;
+        "swift run") launched="launched by a swift run build" ;;
+        make) launched="launched by make (a development server)" ;;
+        shell) launched="launched from a shell" ;;
+        *) launched="launched by: $(cut -c1-80 <<< "${parent:-unknown}")" ;;
+    esac
+    printf '  pid %-6s port %-6s PsyNeuView %s%s%s\n' "${pid}" "${port:-?}" "${version:-?}" \
+        "${mode:+, ${mode}}" "${flavor:+ (${flavor} app)}"
+    printf '             %s\n' "$(home_abbrev "${cwd:-?}")"
+    printf '             since %s; %s\n' "${started}" "${launched}"
+    remember "${pid}" "backend" "backend on port ${port:-?} (PsyNeuView ${version:-?}) in $(home_abbrev "${cwd:-?}")"
+    SEEN_BACKENDS+="${pid} "
+}
+
+list_backends() {
+    echo "Backends (uvicorn)"
+    local any=0 line pid cmd started
+    while IFS= read -r line; do
+        [ -n "${line}" ] || continue
+        cmd="$(command_of "${line}")"
+        case "${cmd}" in
+            *uvicorn*app.main:app*) ;;
+            *) continue ;;
+        esac
+        any=1
+        pid="$(pid_of "${line}")"
+        started="$(started_of "${line}")"
+        describe_backend "${pid}" "${started}" "${cmd}"
+    done <<< "$(all_processes)"
+
+    # Anything else answering as PsyNeuView on a listening port: a backend
+    # started some other way, or a container's forwarded port.
+    local sweep
+    sweep="$(lsof -nP -iTCP -sTCP:LISTEN -Fpn 2>/dev/null | awk '/^p/{pid=substr($0,2)} /^n/{sub(/^n.*:/,""); print pid, $0}' | sort -u -k2,2n || true)"
+    local spid port body title
+    while read -r spid port; do
+        [ -n "${spid}" ] || continue
+        case "${SEEN_BACKENDS}" in *" ${spid} "*) continue ;; esac
+        body="$(openapi_body "${port}")"
+        [ -n "${body}" ] || continue
+        title="$(title_from_openapi "${body}")"
+        case "${title}" in *PsyNeuView*|*PsyNewView*) ;; *) continue ;; esac
+        any=1
+        printf '  pid %-6s port %-6s PsyNeuView %s (answering on this port; process: %s)\n' \
+            "${spid}" "${port}" "$(version_from_openapi "${body}")" "$(command_for_pid "${spid}" | cut -c1-60)"
+        remember "${spid}" "backend" "process answering as PsyNeuView on port ${port}"
+        SEEN_BACKENDS+="${spid} "
+    done <<< "${sweep}"
+    [ "${any}" = 1 ] || echo "  (none)"
+    echo
+}
+
+list_dev_servers() {
+    echo "Development servers (vite)"
+    local any=0 line pid cmd started cwd ports
+    while IFS= read -r line; do
+        [ -n "${line}" ] || continue
+        cmd="$(command_of "${line}")"
+        case "${cmd}" in
+            *node*vite*|*/vite\ *|*/vite) ;;
+            *) continue ;;
+        esac
+        pid="$(pid_of "${line}")"
+        cwd="$(cwd_for_pid "${pid}")"
+        # Only PsyNeuView's frontend; other projects' vite servers are not ours.
+        case "$(tr '[:upper:]' '[:lower:]' <<< "${cwd}${cmd}")" in *psyneuview*|*psynewview*) ;; *) continue ;; esac
+        any=1
+        started="$(started_of "${line}")"
+        ports="$(listen_ports_for_pid "${pid}")"
+        printf '  pid %-6s port %-6s %s\n' "${pid}" "${ports:-?}" "$(home_abbrev "${cwd:-?}")"
+        printf '             since %s\n' "${started}"
+        remember "${pid}" "dev server" "vite on port ${ports:-?} in $(home_abbrev "${cwd:-?}")"
+    done <<< "$(all_processes)"
+    [ "${any}" = 1 ] || echo "  (none)"
+    echo
+}
+
+list_containers() {
+    echo "Containers"
+    local tool any=0 found=0 rows
+    for tool in podman docker; do
+        command -v "${tool}" >/dev/null 2>&1 || continue
+        found=1
+        if ! rows="$("${tool}" ps --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}' 2>/dev/null)"; then
+            echo "  ${tool}: installed, but not running (no machine or daemon)"
+            continue
+        fi
+        local id names image ports status
+        while IFS=$'\t' read -r id names image ports status; do
+            [ -n "${id}" ] || continue
+            case "$(tr '[:upper:]' '[:lower:]' <<< "${names} ${image}")" in *psyneuview*|*psynewview*) ;; *) continue ;; esac
+            any=1
+            printf '  %-8s %s  %s  %s\n' "${tool}" "${names}" "${image}" "${ports:-no ports}"
+            printf '             %s — stop with: %s stop %s\n' "${status}" "${tool}" "${names}"
+        done <<< "${rows}"
+    done
+    if [ "${found}" = 0 ]; then
+        echo "  (neither podman nor docker is installed)"
+    elif [ "${any}" = 0 ]; then
+        echo "  (none)"
+    fi
+    echo
+}
+
+# ── Stop ──────────────────────────────────────────────────────────────
+
+stop_pid() {
+    local pid="$1" yes="$2" entry desc
+    list_apps >/dev/null
+    list_backends >/dev/null
+    list_dev_servers >/dev/null
+    entry="$(awk -F'\t' -v p="${pid}" '$1 == p {print; exit}' <<< "${FOUND}")"
+    if [ -z "${entry}" ]; then
+        echo "pid ${pid} is not a PsyNeuView app, backend or dev server this script can see." >&2
+        echo "Run without --stop to list them; containers are stopped with podman/docker stop." >&2
+        exit 1
+    fi
+    desc="$(cut -f3 <<< "${entry}")"
+    echo "pid ${pid}: ${desc}"
+    echo "  $(command_for_pid "${pid}" | cut -c1-120)"
+    if [ "${yes}" != 1 ]; then
+        local answer=""
+        read -r -p "Stop it? [y/N] " answer </dev/tty || answer=""
+        case "${answer}" in y|Y|yes|YES) ;; *) echo "Left running."; exit 0 ;; esac
+    fi
+    kill -TERM "${pid}" 2>/dev/null || { echo "Couldn't signal pid ${pid} (already gone, or not yours)." >&2; exit 1; }
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "${pid}" 2>/dev/null || { echo "Stopped pid ${pid}."; return 0; }
+        sleep 0.5
+    done
+    echo "pid ${pid} is still running after 5 s; sending KILL."
+    kill -KILL "${pid}" 2>/dev/null || true
+    [ "${i}" -gt 0 ] && echo "Stopped pid ${pid}."
+}
+
+# ── Self-test of the pure pieces ──────────────────────────────────────
+
+self_test() {
+    local fails=0
+    check() {
+        local name="$1" want="$2" got="$3"
+        if [ "${want}" = "${got}" ]; then
+            echo "  ✓ ${name}"
+        else
+            echo "  ✗ ${name}: wanted '${want}', got '${got}'"
+            fails=$((fails + 1))
+        fi
+    }
+    echo "pnv-status self-test"
+    check "test bundle id" "test app" "$(flavor_from_bundle_id com.psyneuview.macapp.test)"
+    check "real bundle id" "real app" "$(flavor_from_bundle_id com.psyneuview.macapp)"
+    check "unknown bundle id" "other" "$(flavor_from_bundle_id com.example.other)"
+    check "empty bundle id" "other" "$(flavor_from_bundle_id "")"
+
+    check "app path from a bundle" "/Applications/PsyNeuView Test.app" \
+        "$(app_path_from_command "/Applications/PsyNeuView Test.app/Contents/MacOS/PsyNeuView")"
+    check "app path from a swift run build" "" \
+        "$(app_path_from_command "/Users/x/PsyNeuView-MacApp/.build/debug/PsyNeuView")"
+
+    check "port from the app's uvicorn" "8130" \
+        "$(port_from_command "/Users/x/Library/Application Support/PsyNeuView/psyneuview-0.5.13/backend/.venv/bin/python -m uvicorn app.main:app --port 8130")"
+    check "port from make's uvicorn" "8000" \
+        "$(port_from_command "/Users/x/PsyNeuView/backend/.venv/bin/uvicorn app.main:app --port 8000 --reload --reload-dir app")"
+    check "port with equals sign" "9000" "$(port_from_command "uvicorn app.main:app --port=9000")"
+    check "no port" "" "$(port_from_command "uvicorn app.main:app")"
+
+    local body='{"openapi":"3.1.0","info":{"title":"PsyNeuView","version":"0.5.13"},"paths":{"/x":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"properties":{"version":{"type":"string"}}}}}}}}}}}'
+    check "version from openapi" "0.5.13" "$(version_from_openapi "${body}")"
+    check "title from openapi" "PsyNeuView" "$(title_from_openapi "${body}")"
+    check "version from openapi with spaces" "0.1.0" \
+        "$(version_from_openapi '{"openapi": "3.1.0", "info": {"title": "PsyNeuView", "version": "0.1.0"}, "paths": {}}')"
+    check "no version in a non-PsyNeuView body" "" "$(version_from_openapi '<html>nope</html>')"
+
+    local psline="/x/python -m uvicorn app.main:app --port 8130 PATH=/x/bin PSYNEUVIEW_APP_FLAVOR=test PSYNEUVIEW_DEPLOYMENT_MODE=mac_app HOME=/Users/x"
+    check "env flavor from ps -E" "test" "$(env_value_from_ps PSYNEUVIEW_APP_FLAVOR "${psline}")"
+    check "env mode from ps -E" "mac_app" "$(env_value_from_ps PSYNEUVIEW_DEPLOYMENT_MODE "${psline}")"
+    check "env absent from ps -E" "" "$(env_value_from_ps PSYNEUVIEW_NOPE "${psline}")"
+
+    check "launcher: the app" "app" "$(launcher_kind "/Applications/PsyNeuView.app/Contents/MacOS/PsyNeuView")"
+    check "launcher: swift run" "swift run" "$(launcher_kind "/Users/x/PsyNeuView-MacApp/.build/debug/PsyNeuView")"
+    check "launcher: make" "make" "$(launcher_kind "make backend")"
+    check "launcher: a shell" "shell" "$(launcher_kind "/bin/zsh -l")"
+    check "launcher: unknown" "unknown" "$(launcher_kind "")"
+
+    echo
+    if [ "${fails}" = 0 ]; then
+        echo "all checks passed"
+    else
+        echo "${fails} check(s) failed"
+        exit 1
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────
+
+usage() {
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+STOP=""
+YES=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --stop) [ $# -ge 2 ] || { usage >&2; exit 2; }; STOP="$2"; shift 2 ;;
+        --yes|-y) YES=1; shift ;;
+        --self-test) self_test; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+if [ -n "${STOP}" ]; then
+    case "${STOP}" in ''|*[!0-9]*) echo "--stop needs a pid" >&2; exit 2 ;; esac
+    stop_pid "${STOP}" "${YES}"
+    exit 0
+fi
+
+echo "PsyNeuView on this Mac — $(date '+%Y-%m-%d %H:%M:%S')"
+echo
+list_apps
+list_backends
+list_dev_servers
+list_containers
+echo "Stop one with: $(basename "$0") --stop <pid>"

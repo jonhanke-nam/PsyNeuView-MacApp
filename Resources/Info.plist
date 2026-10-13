@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>PsyNeuView</string>
+	<key>CFBundleExecutable</key>
+	<string>PsyNeuView</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.psyneuview.macapp</string>
+	<key>CFBundleName</key>
+	<string>PsyNeuView</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.5.22</string>
+	<key>CFBundleVersion</key>
+	<string>0.5.22</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://jonhanke-nam.github.io/PsyNeuView-releases/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>odz5vLU4g7U6CH++AydGJks4j6XqF3dtdPEVLHQXKk8=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>14400</integer>
+</dict>
+</plist>

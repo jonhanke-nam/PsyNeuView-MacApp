@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+PsyNeuView.app/
+*.dmg
+.dmg-staging/
+
+# Bundled CPython runtime — fetched by scripts/fetch-python.sh, never committed (#64)
+Resources/python-*/
+# Staged PsyNeuView archive — built by scripts/fetch-psyneuview.sh (#74)
+Resources/psyneuview-*.tar.gz
+# Bundled uv binary — fetched by scripts/fetch-uv.sh (#94)
+Resources/uv-*/
+PsyNeuView Test.app/

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Allow outbound network connections (HTTP to localhost, GitHub API) -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Allow spawning subprocesses (Python backend, Node, git, etc.) -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<!--
+	  The bundled interpreter dlopens extension modules from the backend venv —
+	  numpy, scipy, torch — which pip installs unsigned or ad-hoc signed. Under
+	  the hardened runtime, library validation would refuse every one of them,
+	  and the backend would die on `import numpy` despite the app launching
+	  cleanly. (#64, under #26)
+	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

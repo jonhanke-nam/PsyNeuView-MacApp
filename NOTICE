@@ -1,0 +1,6 @@
+PsyNeuView for Mac
+Copyright 2026 The PsyNeuView Authors
+
+The app bundles PsyNeuView (Apache License 2.0) and installs PsyNeuLink
+(https://github.com/PrincetonUniversity/PsyNeuLink, Apache License 2.0).
+Third-party components keep their own licenses.
