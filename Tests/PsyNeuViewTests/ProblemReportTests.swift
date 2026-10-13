@@ -334,7 +334,18 @@ final class ProblemReportTests: XCTestCase {
         XCTAssertEqual(value("view"), "cm")
         XCTAssertEqual(value("to"), "help@example.org")
         XCTAssertEqual(value("su"), "PsyNeuView problem report PNV-debugging-2026-10-06_14-03-22")
-        XCTAssertTrue(value("body")?.contains("Please attach the folder PNV-debugging-2026-10-06_14-03-22 from your Downloads folder") ?? false)
+        // A link can't attach files (#5): the request to attach is the first line.
+        XCTAssertTrue(value("body")?.hasPrefix("Please attach PNV-debugging-2026-10-06_14-03-22.zip before sending") ?? false)
+    }
+
+    func testTheGmailAttachRequestSurvivesACut() throws {
+        // A long report is cut to fit the link; the cut is at the end, so the
+        // attach request, now first, is always kept (#5).
+        let url = try XCTUnwrap(ProblemReport.gmailURL(request(), to: "help@example.org", home: Self.home, maxLength: 700))
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        let body = try XCTUnwrap(items.first { $0.name == "body" }?.value)
+        XCTAssertTrue(body.hasPrefix(ProblemReport.gmailAttachRequest(request())))
+        XCTAssertLessThanOrEqual(url.absoluteString.count, 700)
     }
 
     func testTheInstructionsNameTheContact() {
