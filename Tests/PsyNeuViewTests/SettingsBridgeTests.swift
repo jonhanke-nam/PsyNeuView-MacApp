@@ -34,6 +34,12 @@ final class SettingsBridgeTests: XCTestCase {
             decidedChoices.append(choice)
             return decision
         }
+        var found: AppUpdateWatch.Found?
+        var installRequests = 0
+        func appUpdate() -> [String: Any] {
+            AppUpdateWatch.bridgeValue(running: "0.5.22", found: found)
+        }
+        func installAppUpdate() { installRequests += 1 }
     }
 
     private func reply(_ outcome: SettingsBridge.Outcome) -> [String: Any]? {
@@ -209,5 +215,27 @@ final class SettingsBridgeTests: XCTestCase {
         for bad in ["a@b", "a b@c.d", "a@b.c, d@e.f", "@b.c", "a@@b.c"] {
             XCTAssertNil(try? SettingsBridge.emailAddress(bad).get(), bad)
         }
+    }
+
+    // MARK: App update (#6)
+
+    func testSnapshotSaysWhetherAnAppUpdateIsWaiting() throws {
+        let host = FakeHost()
+        var snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual((snapshot["appUpdate"] as? [String: Any])?["available"] as? Bool, false)
+
+        host.found = AppUpdateWatch.Found(version: "0.6.0", releaseNotesURL: nil)
+        snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        let update = try XCTUnwrap(snapshot["appUpdate"] as? [String: Any])
+        XCTAssertEqual(update["available"] as? Bool, true)
+        XCTAssertEqual(update["version"] as? String, "0.6.0")
+    }
+
+    func testInstallUpdateOpensSparkleAndRepliesWithASnapshot() throws {
+        let host = FakeHost()
+        host.found = AppUpdateWatch.Found(version: "0.6.0", releaseNotesURL: nil)
+        let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "installUpdate"], host: host)))
+        XCTAssertEqual(host.installRequests, 1)
+        XCTAssertNotNil(snapshot["appUpdate"])
     }
 }

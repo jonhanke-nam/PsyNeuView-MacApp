@@ -58,8 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var sparkleUpdater: SPUStandardUpdaterController = {
         SPUStandardUpdaterController(
             startingUpdater: AppIdentity.current.updatesEnabled,
-            updaterDelegate: nil, userDriverDelegate: nil)
+            updaterDelegate: appUpdateObserver, userDriverDelegate: nil)
     }()
+
+    /// Hears what Sparkle's checks find, so the page can say an update is
+    /// waiting (#6). Kept here: Sparkle holds its delegate weakly.
+    private let appUpdateObserver = AppUpdateObserver()
 
     // Tracks whether the setup wizard completed successfully (user clicked Launch)
     private var setupCompleted = false
@@ -141,6 +145,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsHost.onAutoRestartChanged = { [weak self] on in self?.processManager.autoRestart = on }
         settingsHost.onDeveloperModeChanged = { [weak self] _ in self?.refreshCodeUpdateVisibility() }
         settingsHost.onSwitchInstall = { [weak self] decision in self?.switchInstall(decision) }
+        settingsHost.onInstallAppUpdate = { [weak self] in self?.sparkleUpdater.checkForUpdates(nil) }
+        appUpdateObserver.onChange = { [weak self] found in
+            guard let self, let host = self.settingsHost else { return }
+            MainActor.assumeIsolated {
+                guard host.foundAppUpdate != found else { return }
+                host.foundAppUpdate = found
+                // Every open window's page hears it, as after any setting change.
+                NotificationCenter.default.post(
+                    name: SettingsBridge.didChange, object: nil,
+                    userInfo: ["snapshot": SettingsBridge.snapshot(host)])
+            }
+        }
         pagePreferences.log = { [weak self] line in self?.logCollector.add(line, source: .system) }
         configureProblemReport()
 
@@ -557,6 +573,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.helpMenu = helpMenu
 
         NSApp.mainMenu = mainMenu
+        // Ask the feed once, quietly, so a waiting update shows in the window
+        // without waiting hours for Sparkle's next scheduled check (#6). No
+        // window or alert: Sparkle's own prompt still comes on its schedule.
+        if AppIdentity.current.updatesEnabled {
+            sparkleUpdater.updater.checkForUpdateInformation()
+        }
     }
 
     // MARK: - Development menu (dynamic)

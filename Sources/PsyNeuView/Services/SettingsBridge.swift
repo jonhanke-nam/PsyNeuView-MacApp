@@ -18,6 +18,11 @@ protocol SettingsBridgeHost: AnyObject {
     func setReportSendTo(_ address: String)
     func installState() -> SettingsBridge.InstallState
     func decide(_ choice: InstallSwitch.Choice) -> InstallSwitch.Decision
+    /// An app update Sparkle found and that isn't installed yet (#6), as the
+    /// bridge's `appUpdate` value.
+    func appUpdate() -> [String: Any]
+    /// Opens Sparkle's own update window for the waiting update (#6).
+    func installAppUpdate()
 }
 
 /// The `pnvSettings` bridge between PsyNeuView's Settings and the app (#200).
@@ -41,11 +46,17 @@ protocol SettingsBridgeHost: AnyObject {
 ///     { op: "switchInstall", choice: "bundled" | "checkout", path? } -> Verdict
 ///         (when the verdict is a switch, the app then stops, switches and
 ///          starts again; the page goes away with the old server)
+///     { op: "installUpdate" }                        -> Snapshot
+///         (opens Sparkle's update window for the waiting app update; #6)
 ///
 ///     Snapshot = { install: { running, choice, checkoutPath, includedVersion,
 ///                             recentCheckouts }, autoRestart, launchAtLogin,
 ///                  developerMode, reportSendWith, reportSendTo,
-///                  reportSendToDefault }
+///                  reportSendToDefault, appUpdate }
+///         appUpdate = { available: false }
+///                   | { available: true, version, releaseNotesURL | null }
+///           (#6; absent from apps before it, so the page treats a missing
+///            key as "no update waiting")
 ///         (reportSendToDefault: who reports go to when "Send to" is empty,
 ///          for the page's placeholder; the page never hard-codes it)
 ///     Verdict  = { decision: "nothingToDo" | "useBundled" | "useCheckout"
@@ -53,7 +64,8 @@ protocol SettingsBridgeHost: AnyObject {
 ///
 /// Events the app sends the page, as window CustomEvents:
 ///   `pnv:mac-settings-changed` (detail: Snapshot) after any change, so every
-///   open window shows the same values; `pnv:open-settings` for ⌘,.
+///   open window shows the same values — including when Sparkle finds an app
+///   update (#6); `pnv:open-settings` for ⌘,.
 ///
 /// All message handling is here, as a pure function over a host, so it can
 /// be tested without a web view.
@@ -157,6 +169,10 @@ enum SettingsBridge {
             }
             return Outcome(reply: .success(snapshot(host)))
 
+        case "installUpdate":
+            host.installAppUpdate()
+            return Outcome(reply: .success(snapshot(host)))
+
         case "checkInstall", "switchInstall":
             guard let choice = choice(from: body) else {
                 return fail("pnvSettings: 'choice' must be \"bundled\" or \"checkout\"")
@@ -203,6 +219,7 @@ enum SettingsBridge {
             "reportSendWith": host.reportSendWith,
             "reportSendTo": host.reportSendTo,
             "reportSendToDefault": ReportDefaults.contactEmail,
+            "appUpdate": host.appUpdate(),
         ]
     }
 
