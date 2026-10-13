@@ -156,7 +156,27 @@ struct ReportProblemView: View {
                           ? "Opens your mail app with the report attached."
                           : "No mail app is set up on this Mac.")
                 sendButton("Gmail", preferred: plan.preferred == .gmail) { model.gmail() }
-                    .help("Opens Gmail in your browser. Attach the folder from Downloads there.")
+                    .help("Opens Gmail in your browser and selects the report's file in Finder, to drag into Gmail.")
+            }
+
+            if model.awaitingGmailAttachment {
+                // A link can't attach files (#5): this stays until the sender
+                // says the file is attached, so a report doesn't go out empty.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Attach this file to finish your report", systemImage: "paperclip")
+                        .font(.headline)
+                    Text("Drag \(model.attachmentName) from the Finder window into the Gmail message, then send. "
+                         + "Without it, the report has no logs or screenshot.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Button("Show the file again") { model.revealAttachment() }
+                        Button("I've attached it") { model.confirmGmailAttached() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.6)))
             }
 
             if model.developerMode() && ProblemReport.githubIssuesEnabled {

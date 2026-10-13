@@ -35,6 +35,9 @@ final class ProblemReportModel {
     var error: String?
     /// Brief confirmation after Copy summary.
     var copiedSummary = false
+    /// Gmail was opened and the report still has to be attached there by
+    /// hand (#5). Shown in the window until the sender says it's done.
+    var awaitingGmailAttachment = false
     /// What the page provided when the screen opened (#208); nil while the
     /// page is still being asked.
     var pageDiagnostics: PageDiagnostics.Outcome?
@@ -92,6 +95,7 @@ final class ProblemReportModel {
         savedRequest = nil
         error = nil
         copiedSummary = false
+        awaitingGmailAttachment = false
         pageDiagnostics = nil
     }
 
@@ -261,10 +265,26 @@ final class ProblemReportModel {
         service.perform(withItems: [ProblemReport.summary(r), attachment])
     }
 
-    /// Gmail's web compose. A link can't attach files; the body says to.
+    /// Gmail's web compose. A link can't attach files (#5), so the report's
+    /// .zip is also selected in Finder, ready to drag into Gmail, and the
+    /// window asks for it until the sender confirms.
     func gmail() {
         guard let r = savedRequest, let url = ProblemReport.gmailURL(r, to: ProblemReport.contact(sendTo())) else { return }
         NSWorkspace.shared.open(url)
+        revealAttachment()
+        awaitingGmailAttachment = true
+    }
+
+    /// The file to drag into Gmail: the .zip, else the folder.
+    var attachmentName: String { attachment?.lastPathComponent ?? "" }
+
+    func revealAttachment() {
+        guard let attachment else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([attachment])
+    }
+
+    func confirmGmailAttached() {
+        awaitingGmailAttachment = false
     }
 
     /// Developer mode only: a prefilled new issue. The repos are private, so
