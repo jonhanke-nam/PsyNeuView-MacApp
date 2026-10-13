@@ -35,9 +35,9 @@ final class ProblemReportModel {
     var error: String?
     /// Brief confirmation after Copy summary.
     var copiedSummary = false
-    /// Gmail was opened and the report still has to be attached there by
-    /// hand (#5). Shown in the window until the sender says it's done.
-    var awaitingGmailAttachment = false
+    /// What the window asks after a send (#5): nothing, a short check, or
+    /// the attach step that stays until the sender says it's done.
+    var attachReminder: ProblemReport.AttachReminder = .none
     /// What the page provided when the screen opened (#208); nil while the
     /// page is still being asked.
     var pageDiagnostics: PageDiagnostics.Outcome?
@@ -95,7 +95,7 @@ final class ProblemReportModel {
         savedRequest = nil
         error = nil
         copiedSummary = false
-        awaitingGmailAttachment = false
+        attachReminder = .none
         pageDiagnostics = nil
     }
 
@@ -249,6 +249,7 @@ final class ProblemReportModel {
         guard let attachment else { return }
         let picker = NSSharingServicePicker(items: [attachment])
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+        after(.share)
     }
 
     /// The default mail app (Mail, or Outlook if that's the default), with the
@@ -263,19 +264,43 @@ final class ProblemReportModel {
         service.recipients = [ProblemReport.contact(sendTo())]
         service.subject = ProblemReport.emailSubject(r)
         service.perform(withItems: [ProblemReport.summary(r), attachment])
+        after(.email)
     }
 
-    /// Gmail's web compose. A link can't attach files (#5), so the report's
-    /// .zip is also selected in Finder, ready to drag into Gmail, and the
-    /// window asks for it until the sender confirms.
+    /// Gmail's web compose. A link can't attach files (#5).
     func gmail() {
         guard let r = savedRequest, let url = ProblemReport.gmailURL(r, to: ProblemReport.contact(sendTo())) else { return }
         NSWorkspace.shared.open(url)
-        revealAttachment()
-        awaitingGmailAttachment = true
+        after(.gmail)
     }
 
-    /// The file to drag into Gmail: the .zip, else the folder.
+    /// Outlook on the web's compose page. A link can't attach files (#5).
+    func outlookWeb() {
+        guard let r = savedRequest, let url = ProblemReport.outlookWebURL(r, to: ProblemReport.contact(sendTo())) else { return }
+        NSWorkspace.shared.open(url)
+        after(.outlookWeb)
+    }
+
+    /// Outlook when it isn't the default mail app: a mailto link opened in
+    /// Outlook itself, which can't carry the file (#5).
+    func outlookApp() {
+        guard let r = savedRequest, let url = ProblemReport.mailtoURL(r, to: ProblemReport.contact(sendTo())),
+              let outlook = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.outlookBundleID) else {
+            outlookWeb()
+            return
+        }
+        NSWorkspace.shared.open([url], withApplicationAt: outlook, configuration: NSWorkspace.OpenConfiguration())
+        after(.outlookApp)
+    }
+
+    /// After a route: select the file in Finder when it must be attached by
+    /// hand, and set what the window asks (#5).
+    private func after(_ route: ProblemReport.Route) {
+        attachReminder = ProblemReport.attachReminder(after: route, setup: mailSetup)
+        if attachReminder == .required { revealAttachment() }
+    }
+
+    /// The file to attach: the .zip, else the folder.
     var attachmentName: String { attachment?.lastPathComponent ?? "" }
 
     func revealAttachment() {
@@ -283,8 +308,8 @@ final class ProblemReportModel {
         NSWorkspace.shared.activateFileViewerSelecting([attachment])
     }
 
-    func confirmGmailAttached() {
-        awaitingGmailAttachment = false
+    func confirmAttached() {
+        attachReminder = .none
     }
 
     /// Developer mode only: a prefilled new issue. The repos are private, so

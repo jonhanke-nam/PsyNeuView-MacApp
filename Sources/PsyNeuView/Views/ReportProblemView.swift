@@ -157,20 +157,33 @@ struct ReportProblemView: View {
                           : "No mail app is set up on this Mac.")
                 sendButton("Gmail", preferred: plan.preferred == .gmail) { model.gmail() }
                     .help("Opens Gmail in your browser and selects the report's file in Finder, to drag into Gmail.")
+                if plan.preferred == .outlookApp {
+                    sendButton("Outlook", preferred: true) { model.outlookApp() }
+                        .help("Opens Outlook with the message and selects the report's file in Finder, to drag in.")
+                }
+                sendButton("Outlook on the web", preferred: plan.preferred == .outlookWeb) { model.outlookWeb() }
+                    .help("Opens Outlook in your browser and selects the report's file in Finder, to drag in.")
             }
 
-            if model.awaitingGmailAttachment {
-                // A link can't attach files (#5): this stays until the sender
-                // says the file is attached, so a report doesn't go out empty.
+            if model.attachReminder == .check {
+                Label("Check the report file is attached before you send.", systemImage: "paperclip")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.attachReminder == .required {
+                // Links and fallbacks can't attach files (#5): this stays until
+                // the sender says the file is attached, so a report doesn't go
+                // out empty.
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Attach this file to finish your report", systemImage: "paperclip")
                         .font(.headline)
-                    Text("Drag \(model.attachmentName) from the Finder window into the Gmail message, then send. "
+                    Text("Drag \(model.attachmentName) from the Finder window into the message, then send. "
                          + "Without it, the report has no logs or screenshot.")
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
                         Button("Show the file again") { model.revealAttachment() }
-                        Button("I've attached it") { model.confirmGmailAttached() }
+                        Button("I've attached it") { model.confirmAttached() }
                             .buttonStyle(.borderedProminent)
                     }
                 }
