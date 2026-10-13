@@ -1369,6 +1369,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let urlString = Constants.frontendURL(port: appState.backendPort)
         guard let url = URL(string: urlString) else { return }
 
+        // An update must show its own page, not the last version's from the
+        // web cache (#1): clear the cache first when the app or PsyNeuView changed.
+        WebCache.clearIfNeeded(
+            repoPath: appState.repoPath,
+            log: { [weak self] line in self?.logCollector.add(line, source: .system) },
+            then: { [weak self] in self?.openAppWindow(url: url) })
+    }
+
+    private func openAppWindow(url: URL) {
         let settingsWanted = openSettingsWhenWindowOpens
         let webView = AppWindowView(
             url: url, settingsHost: settingsHost, openSettingsOnLoad: settingsWanted,
