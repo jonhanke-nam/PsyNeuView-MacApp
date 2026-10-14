@@ -1006,10 +1006,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             logCollector.add(
                 "Checking \(InstallSwitch.abbreviated(repoPath.path)) against origin...",
                 source: .system)
-            switch await updater.pullReadiness(repoPath: repoPath) {
+            let state = await updater.pullState(repoPath: repoPath)
+            var adopt = false
+            switch CheckoutPull.decide(state) {
             case .refuse(let why):
                 logCollector.add(why, source: .system, isError: true)
-                return
+                // Origin's history was rebuilt: offer to move the checkout
+                // onto it, keeping its own commits on a backup branch.
+                guard CheckoutPull.mayAdoptNewHistory(state), let branch = state.branch,
+                      confirmMoveToNewHistory(branch: branch, repoPath: repoPath) else { return }
+                adopt = true
             case .nothingToPull(let why):
                 logCollector.add(why, source: .system)
                 return
@@ -1022,7 +1028,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? await Task.sleep(for: .seconds(2))
 
             logCollector.add("Checking for updates...", source: .system)
-            let success = await updater.update(repoPath: repoPath)
+            let success = await updater.update(repoPath: repoPath, adoptNewHistory: adopt)
             if success {
                 logCollector.add("Restarting with updated code...", source: .system)
                 // Close app windows so they reload with new code
@@ -1031,6 +1037,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 startServices()
             }
         }
+    }
+
+    /// Ask before moving a checkout onto origin's rebuilt history. Says what
+    /// happened, what will change, and where its own commits will be.
+    private func confirmMoveToNewHistory(branch: String, repoPath: URL) -> Bool {
+        let backup = CheckoutPull.backupBranch(for: branch, on: Date())
+        let alert = NSAlert()
+        alert.messageText = "PsyNeuView's history was rebuilt"
+        alert.informativeText =
+            "The PsyNeuView repository now holds a rebuilt history, so this checkout "
+            + "(\(InstallSwitch.abbreviated(repoPath.path)) on \(branch)) can't be updated "
+            + "the usual way.\n\nMove it to the new history? \(branch) will match "
+            + "origin/\(branch); this checkout's own commits stay on the branch \(backup), "
+            + "and untracked files are left as they are. PsyNeuView then rebuilds and restarts."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Move to New History")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     @objc func startServices() {

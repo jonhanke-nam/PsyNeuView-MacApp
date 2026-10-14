@@ -12,7 +12,7 @@ import Foundation
 /// do about it.
 ///
 /// The decision is a pure function over `State`, so it can be tested without
-/// a repository; `Updater.pullReadiness` is the one place that reads one.
+/// a repository; `Updater.pullState` is the one place that reads one.
 enum CheckoutPull {
 
     /// What `git` reported about the checkout, read once.
@@ -30,18 +30,44 @@ enum CheckoutPull {
         /// Commits on origin's branch that are not here.
         var behind: Int
         /// The checkout and origin's branch share no history at all (`git
-        /// merge-base` finds none). That is what an old checkout sees after
-        /// PsyNeuView moved to a fresh public repository on 2026-10-13: the
-        /// same URL now holds unrelated history.
+        /// merge-base` finds none). That is what an existing checkout sees
+        /// when PsyNeuView's repository history is rebuilt: the same URL now
+        /// holds a history whose commits all have new IDs.
         var unrelated: Bool = false
     }
 
-    /// Said when the histories are unrelated: what happened, and both ways on.
-    static let unrelatedHistoryMessage =
-        "This checkout's history isn't related to origin's: PsyNeuView moved to a fresh "
-        + "public repository (github.com/jonhanke-nam/PsyNeuView) on 2026-10-13; not pulled. "
-        + "Clone it again to follow the public repository, or point origin at "
-        + "github.com/jonhanke-nam/PsyNeuView-archive to stay on the old history."
+    /// Said when the histories are unrelated: what happened, and the way on.
+    /// A launch only says it; "Update PsyNeuView checkout…" offers to do it.
+    static func unrelatedHistoryMessage(_ state: State) -> String {
+        let what = "This checkout's history isn't related to origin's: PsyNeuView's "
+            + "repository history was rebuilt, so its commits have new IDs; not pulled. "
+        if state.changedFiles > 0 {
+            return what + "Commit or stash the local changes, then choose "
+                + "“Update PsyNeuView checkout…” to move this checkout to the new history."
+        }
+        return what + "Choose “Update PsyNeuView checkout…” to move this checkout to the "
+            + "new history; its own commits are kept on a backup branch."
+    }
+
+    /// Whether the checkout may be moved onto origin's rebuilt history (when
+    /// the user asks): the histories are unrelated, origin was just fetched,
+    /// it is on a branch, and nothing tracked is changed. Untracked files are
+    /// left alone by the move (`git reset --keep`), which refuses rather than
+    /// overwrite one.
+    static func mayAdoptNewHistory(_ state: State) -> Bool {
+        state.unrelated && state.fetched && state.changedFiles == 0
+            && !(state.branch ?? "").isEmpty
+    }
+
+    /// Where the checkout's own commits are kept when it moves to the new
+    /// history: `old-history/<branch>-<yyyymmdd>`.
+    static func backupBranch(for branch: String, on date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyyMMdd"
+        return "old-history/\(branch)-\(f.string(from: date))"
+    }
 
     enum Decision: Equatable {
         /// Fast-forward `branch` to origin's copy of it.
@@ -65,7 +91,7 @@ enum CheckoutPull {
                 + "Check the network and the remote, then try again.")
         }
         if state.unrelated {
-            return .refuse(unrelatedHistoryMessage)
+            return .refuse(unrelatedHistoryMessage(state))
         }
         if state.changedFiles > 0 {
             let files = state.changedFiles == 1 ? "1 file" : "\(state.changedFiles) files"
