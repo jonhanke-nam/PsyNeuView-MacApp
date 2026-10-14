@@ -41,6 +41,13 @@ REQUIRED=(
 
 fail() { echo "::error::$*" >&2; echo "✗ $*" >&2; exit 1; }
 
+# The pin must be a release tag (see psyneuview-pin.conf): a commit ID would
+# stop resolving if PsyNeuView's history were ever rebuilt.
+if [ -z "${1:-}" ]; then
+  gh api "repos/${REPO}/git/ref/tags/${REF}" --jq .ref >/dev/null 2>&1 \
+    || fail "psyneuview-pin.conf pins '${REF}', which isn't a tag in ${REPO}. Pin a release tag (e.g. v0.6.0), not a commit or branch."
+fi
+
 SHA="$(gh api "repos/${REPO}/commits/${REF}" --jq .sha 2>/dev/null)" \
   || fail "Couldn't look up ${REF} in ${REPO}."
 echo "PsyNeuView ${REF} is ${SHA:0:12}"
