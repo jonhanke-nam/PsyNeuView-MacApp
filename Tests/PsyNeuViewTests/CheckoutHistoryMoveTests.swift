@@ -90,16 +90,23 @@ final class CheckoutHistoryMoveTests: XCTestCase {
         try await git(["fetch", "-q", "origin", "devel"], in: checkout)
         try write("my own file\n", to: "clash.txt", in: checkout)
 
-        var said: [String] = []
-        let lock = NSLock()
+        let said = Lines()
         let moved = await Updater.moveToNewHistory(
-            branch: "devel", repoPath: checkout, log: { line in lock.lock(); said.append(line); lock.unlock() })
+            branch: "devel", repoPath: checkout, log: { said.add($0) })
 
         XCTAssertFalse(moved)
         let head = try await git(["rev-parse", "HEAD"], in: checkout)
         XCTAssertEqual(head, oldHead, "nothing moved")
         let mine = try String(contentsOf: checkout.appendingPathComponent("clash.txt"), encoding: .utf8)
         XCTAssertEqual(mine, "my own file\n", "the untracked file is untouched")
-        XCTAssertTrue(said.contains { $0.contains("nothing was changed") }, "\(said)")
+        XCTAssertTrue(said.all.contains { $0.contains("nothing was changed") }, "\(said.all)")
     }
+}
+
+/// Log lines collected from a concurrently-called closure.
+private final class Lines: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String] = []
+    func add(_ line: String) { lock.lock(); items.append(line); lock.unlock() }
+    var all: [String] { lock.lock(); defer { lock.unlock() }; return items }
 }
