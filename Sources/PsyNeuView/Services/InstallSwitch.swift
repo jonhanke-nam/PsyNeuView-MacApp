@@ -181,9 +181,12 @@ enum InstallSwitch {
 
     /// One plain line saying which PsyNeuView is running, for Settings, About
     /// and the log: "PsyNeuView 0.5.8, included with this app" or "Your
-    /// PsyNeuView checkout at ~/code/PsyNeuView, on branch devel".
+    /// PsyNeuView checkout at ~/code/PsyNeuView, on branch devel". A checkout's
+    /// declared version goes in when known, "Your PsyNeuView checkout (0.6.1)
+    /// at …", so a report shows an out-of-date one at a glance (#16).
     static func describe(
-        path: String?, facts: Facts?, branch: String?, home: String = NSHomeDirectory()
+        path: String?, facts: Facts?, branch: String?, version: String? = nil,
+        home: String = NSHomeDirectory()
     ) -> String {
         guard let path, let facts, facts.exists else { return "PsyNeuView isn't installed yet" }
         switch kind(of: facts) {
@@ -192,8 +195,9 @@ enum InstallSwitch {
             return "PsyNeuView included with this app"
         case .checkout:
             let shown = abbreviated(path, home: home)
-            if let branch { return "Your PsyNeuView checkout at \(shown), on branch \(branch)" }
-            return "Your PsyNeuView checkout at \(shown)"
+            let which = version.map { "Your PsyNeuView checkout (\($0))" } ?? "Your PsyNeuView checkout"
+            if let branch { return "\(which) at \(shown), on branch \(branch)" }
+            return "\(which) at \(shown)"
         }
     }
 
@@ -254,6 +258,8 @@ enum InstallSwitch {
     /// `describe`, reading the folder.
     static func describeRunning(_ url: URL?) -> String {
         guard let url else { return describe(path: nil, facts: nil, branch: nil) }
-        return describe(path: url.path, facts: facts(at: url), branch: currentBranch(at: url))
+        return describe(
+            path: url.path, facts: facts(at: url), branch: currentBranch(at: url),
+            version: OlderCheckout.declaredVersion(atCheckout: url))
     }
 }
