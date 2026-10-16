@@ -154,7 +154,7 @@ final class SettingsSnapshotTests: XCTestCase {
         XCTAssertEqual(settings["developerMode"] as? Bool, true)
         XCTAssertEqual(settings["branch"] as? String, "devel")
         XCTAssertEqual(ProblemReport.preview(.settings, of: r, home: Self.home, timeZone: Self.utc)
-            .components(separatedBy: "\n").count, 19)
+            .components(separatedBy: "\n").count, 21)
 
         r.included.remove(.settings)
         let without = ProblemReport.build(r, home: Self.home, timeZone: Self.utc)
