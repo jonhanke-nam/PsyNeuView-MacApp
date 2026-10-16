@@ -154,7 +154,7 @@ final class ProblemReportTests: XCTestCase {
             ("oauth gho_ABCDEFGHIJKLMNOPQRST1234 ok", "gho_ABCDEFGHIJ"),
             ("pat github_pat_11ABCDEFG0123456789_abcdefghijklmnop", "github_pat_11ABCDEFG"),
             ("git clone https://x-access-token:s3cr3tvalue@github.com/a/b.git", "s3cr3tvalue"),
-            ("fetch https://jon:hunter2@example.com/x", "hunter2"),
+            ("fetch https://user:hunter2@example.com/x", "hunter2"),
             ("Authorization: Bearer abc.def.ghi", "abc.def.ghi"),
             ("authorization=token zzzzzzzz", "zzzzzzzz"),
             ("GET /cb?code=1&token=AbC123xyz&state=2", "AbC123xyz"),
