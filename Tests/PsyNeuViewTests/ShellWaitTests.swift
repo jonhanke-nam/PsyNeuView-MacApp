@@ -46,6 +46,36 @@ final class ShellWaitTests: XCTestCase {
         XCTAssertEqual(status, -1)
     }
 
+    /// `Shell.run` too (#13): it waited with `waitUntilExit()`, which listens on
+    /// the launching thread's run loop, and resumed elsewhere after its awaits.
+    /// On CI a `git rev-parse` stalled that way with its git long gone. Many
+    /// runs, because which thread it resumes on is luck.
+    func testShellRunAlwaysReportsAFinishedCommand() async {
+        for i in 0..<200 {
+            let result = await giveUpAfter(seconds: 5) {
+                (try? await Shell.run("sh", arguments: ["-c", "echo \(i)"]))?.stdout
+            }
+            XCTAssertEqual(result, "\(i)\n", "Shell.run never returned for run \(i)")
+            if result != "\(i)\n" { return }
+        }
+    }
+
+    /// Like `withTimeout`, but returns on time even if `body` never does: a
+    /// task group would wait for its stuck child before returning.
+    private func giveUpAfter<T: Sendable>(seconds: Double, _ body: @escaping @Sendable () async -> T?) async -> T? {
+        let first = FirstOnly()
+        return await withCheckedContinuation { continuation in
+            Task {
+                let value = await body()
+                if first.claim() { continuation.resume(returning: value) }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if first.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
     /// Runs `body`, or gives up with a sentinel after `seconds`.
     private func withTimeout(seconds: Double, _ body: @escaping @Sendable () async -> Int32) async -> Int32 {
         await withTaskGroup(of: Int32?.self) { group in
@@ -66,4 +96,16 @@ private final class OutputBox: @unchecked Sendable {
     private var parts: [String] = []
     func append(_ s: String) { lock.lock(); parts.append(s); lock.unlock() }
     var text: String { lock.lock(); defer { lock.unlock() }; return parts.joined() }
+}
+
+/// True for the first caller only.
+private final class FirstOnly: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
 }

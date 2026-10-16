@@ -73,19 +73,47 @@ final class CheckoutPullTests: XCTestCase {
             + "not pulled. Rebase or merge in the checkout by hand.")
     }
 
-    /// An old checkout after PsyNeuView moved to a fresh public repository:
-    /// origin's branch shares no history with it. Say what happened and both
-    /// ways on, instead of git's "refusing to merge unrelated histories".
-    func testUnrelatedHistoryIsRefusedWithTheMoveExplained() {
+    /// An existing checkout after PsyNeuView's history was rebuilt: origin's
+    /// branch shares no history with it. Say what happened and the way on,
+    /// instead of git's "refusing to merge unrelated histories".
+    func testUnrelatedHistoryIsRefusedWithTheRebuildExplained() {
         var s = state(ahead: 1500, behind: 1)
         s.unrelated = true
         guard case .refuse(let why) = CheckoutPull.decide(s) else {
             return XCTFail("expected a refusal")
         }
-        XCTAssertEqual(why, CheckoutPull.unrelatedHistoryMessage)
-        XCTAssertTrue(why.contains("fresh public repository"))
-        XCTAssertTrue(why.contains("PsyNeuView-archive"))
-        XCTAssertEqual(Updater.pullSkipReason(for: s), "PsyNeuView moved to a new repository; not pulled")
+        XCTAssertEqual(why, CheckoutPull.unrelatedHistoryMessage(s))
+        XCTAssertTrue(why.contains("history was rebuilt"), why)
+        XCTAssertTrue(why.contains("Update PsyNeuView checkout…"), why)
+        XCTAssertTrue(why.contains("backup branch"), why)
+        XCTAssertEqual(Updater.pullSkipReason(for: s), "PsyNeuView's history was rebuilt; not pulled")
+    }
+
+    /// With local changes the move isn't offered, and the message says to
+    /// commit or stash them first.
+    func testUnrelatedHistoryWithLocalChangesSaysToCommitFirst() {
+        var s = state(changedFiles: 2, behind: 1)
+        s.unrelated = true
+        XCTAssertTrue(CheckoutPull.unrelatedHistoryMessage(s).contains("Commit or stash"))
+        XCTAssertFalse(CheckoutPull.mayAdoptNewHistory(s))
+    }
+
+    /// The move is offered only for unrelated history, after a good fetch, on
+    /// a branch, with nothing tracked changed.
+    func testMayAdoptNewHistoryOnlyWhenSafe() {
+        var s = state(behind: 1)
+        XCTAssertFalse(CheckoutPull.mayAdoptNewHistory(s), "related history: a pull, not a move")
+        s.unrelated = true
+        XCTAssertTrue(CheckoutPull.mayAdoptNewHistory(s))
+        var noFetch = s; noFetch.fetched = false
+        XCTAssertFalse(CheckoutPull.mayAdoptNewHistory(noFetch))
+        var detached = s; detached.branch = nil
+        XCTAssertFalse(CheckoutPull.mayAdoptNewHistory(detached))
+    }
+
+    func testBackupBranchNamesTheBranchAndDay() {
+        let day = ISO8601DateFormatter().date(from: "2026-10-14T23:30:00Z")!
+        XCTAssertEqual(CheckoutPull.backupBranch(for: "devel", on: day), "old-history/devel-20261014")
     }
 
     /// Never switch branch: a detached HEAD has no branch to fast-forward, so

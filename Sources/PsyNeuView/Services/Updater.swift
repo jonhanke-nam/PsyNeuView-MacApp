@@ -141,16 +141,10 @@ final class Updater {
         InstallSwitch.currentBranch(at: repoPath)
     }
 
-    /// Whether the checkout may be pulled right now, and what to say if not
-    /// (#214). Reads the checkout once — branch, uncommitted changes, and how
-    /// it stands against origin after a fetch — and hands the facts to
-    /// `CheckoutPull.decide`. Never switches branch: the question is about the
-    /// branch the checkout is on, not the one the app remembers.
-    func pullReadiness(repoPath: URL) async -> CheckoutPull.Decision {
-        CheckoutPull.decide(await pullState(repoPath: repoPath))
-    }
-
-    /// The facts `pullReadiness` decides over.
+    /// The facts `CheckoutPull.decide` decides over (#214): the branch, the
+    /// uncommitted changes, and how it stands against origin after a fetch.
+    /// Never switches branch: the question is about the branch the checkout
+    /// is on, not the one the app remembers.
     func pullState(repoPath: URL) async -> CheckoutPull.State {
         guard let branch = Self.currentBranch(repoPath: repoPath) else {
             return CheckoutPull.State(
@@ -547,8 +541,16 @@ final class Updater {
     /// Returns false when a step that ran failed. The caller starts the
     /// server either way: a failed rebuild with an older build on disk is a
     /// worse app than no app, and the checklist shows which step failed.
-    func update(repoPath: URL, progress: InstallProgress? = nil) async -> Bool {
-        let pull = await pullCheckout(repoPath: repoPath, progress: progress)
+    ///
+    /// `adoptNewHistory` is for one case only, and only when the user has
+    /// said yes to it: origin's history was rebuilt, so a fast-forward is
+    /// impossible. The checkout then moves onto origin's branch, keeping its
+    /// own commits on a backup branch (`moveToNewHistory`). A launch never
+    /// passes it.
+    func update(repoPath: URL, progress: InstallProgress? = nil,
+                adoptNewHistory: Bool = false) async -> Bool {
+        let pull = await pullCheckout(repoPath: repoPath, progress: progress,
+                                      adoptNewHistory: adoptNewHistory)
         let facts = await refreshFacts(repoPath: repoPath, pull: pull)
         let plan = CheckoutRefresh.decide(facts)
         let frontendDir = repoPath.appendingPathComponent("frontend")
@@ -659,7 +661,8 @@ final class Updater {
     /// Fast-forward the checkout to origin's copy of its branch, if it is
     /// behind and may be moved (#214). Says on the checklist when there was
     /// nothing to do, and why when it must not.
-    private func pullCheckout(repoPath: URL, progress: InstallProgress?) async -> PullOutcome {
+    private func pullCheckout(repoPath: URL, progress: InstallProgress?,
+                              adoptNewHistory: Bool = false) async -> PullOutcome {
         progress?.begin(.pullCheckout)
 
         // Record where we are first. A fast-forward routinely advances
@@ -671,6 +674,19 @@ final class Updater {
             ? beforePull?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
 
         let state = await pullState(repoPath: repoPath)
+        if adoptNewHistory, CheckoutPull.mayAdoptNewHistory(state), let branch = state.branch {
+            let say: @Sendable (String) -> Void = { [weak self] text in
+                Task { @MainActor [weak self] in self?.log(text) }
+            }
+            if await Self.moveToNewHistory(branch: branch, repoPath: repoPath, log: say) {
+                progress?.finish(.pullCheckout)
+                // Everything may have changed: the refresh compares against
+                // where the checkout was, so it rebuilds what it must.
+                return PullOutcome(pulled: true, previousHead: previousHead)
+            }
+            progress?.fail(.pullCheckout, reason: "couldn't move to the new history")
+            return PullOutcome(pulled: false, previousHead: previousHead)
+        }
         switch CheckoutPull.decide(state) {
         case .refuse(let why):
             log(why)
@@ -700,12 +716,43 @@ final class Updater {
         }
     }
 
+    /// Move the checkout onto origin's rebuilt history: keep its own commits
+    /// on a backup branch, then `git reset --keep origin/<branch>`, which
+    /// leaves untracked files alone and refuses rather than overwrite one.
+    /// The caller has checked `CheckoutPull.mayAdoptNewHistory` (nothing
+    /// tracked is changed) and the user has agreed. Static so it can be tested
+    /// against real repositories.
+    nonisolated static func moveToNewHistory(
+        branch: String, repoPath: URL, on date: Date = Date(),
+        log: @escaping @Sendable (String) -> Void
+    ) async -> Bool {
+        let backup = CheckoutPull.backupBranch(for: branch, on: date)
+        let saved = try? await Shell.run(
+            "git", arguments: ["branch", "-f", backup, "HEAD"], currentDirectory: repoPath)
+        guard saved?.exitCode == 0 else {
+            log("Couldn't keep this checkout's commits on \(backup); not moved.")
+            return false
+        }
+        log("This checkout's commits are kept on branch \(backup).")
+        log("Moving \(branch) to origin/\(branch) (the rebuilt history)...")
+        let reset = try? await Shell.run(
+            "git", arguments: ["reset", "--keep", "origin/\(branch)"], currentDirectory: repoPath)
+        guard reset?.exitCode == 0 else {
+            let why = (reset?.stderr ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            log("Couldn't move \(branch) to the new history; nothing was changed. "
+                + "Its old commits are on \(backup)." + (why.isEmpty ? "" : " git: \(why)"))
+            return false
+        }
+        log("✓ \(branch) now follows the rebuilt history.")
+        return true
+    }
+
     /// A few words for the checklist when the pull didn't happen; the log
     /// has the full sentence from `CheckoutPull`.
     nonisolated static func pullSkipReason(for state: CheckoutPull.State) -> String {
         guard state.branch != nil else { return "not on a branch" }
         guard state.fetched else { return "couldn't reach origin" }
-        if state.unrelated { return "PsyNeuView moved to a new repository; not pulled" }
+        if state.unrelated { return "PsyNeuView's history was rebuilt; not pulled" }
         if state.changedFiles > 0 { return "local changes; not pulled" }
         if state.ahead > 0 && state.behind > 0 { return "diverged from origin; not pulled" }
         if state.ahead > 0 { return "ahead of origin" }

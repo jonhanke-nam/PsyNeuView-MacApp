@@ -143,6 +143,15 @@ enum Shell {
         // Detach stdin so commands like git can't prompt in the terminal
         process.standardInput = FileHandle.nullDevice
 
+        // Heard through the termination handler, attached before launch, as in
+        // `runAndWait` (#185). This used to end with `waitUntilExit()`, which
+        // waits on the run loop of the thread that launched the process; after
+        // the awaits below this code resumes on another thread, so a finished
+        // command could go unnoticed forever. On CI it stalled a plain
+        // `git rev-parse` whose git had long exited (#13).
+        let exit = ExitStatus()
+        process.terminationHandler = { exit.finish($0.terminationStatus) }
+
         try process.run()
 
         // Read pipes concurrently on background threads to prevent deadlock.
@@ -158,13 +167,41 @@ enum Shell {
 
         let outData = await stdoutData
         let errData = await stderrData
-
-        // Now wait for the process to finish
-        process.waitUntilExit()
+        let status = await exit.value()
 
         let stdout = String(data: outData, encoding: .utf8) ?? ""
         let stderr = String(data: errData, encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdout, stderr)
+        return (status, stdout, stderr)
+    }
+
+    /// A process's exit status, set once by its termination handler and
+    /// awaited by whoever started it, in either order.
+    final class ExitStatus: @unchecked Sendable {
+        private let lock = NSLock()
+        private var status: Int32?
+        private var waiter: CheckedContinuation<Int32, Never>?
+
+        func finish(_ value: Int32) {
+            lock.lock()
+            status = value
+            let w = waiter
+            waiter = nil
+            lock.unlock()
+            w?.resume(returning: value)
+        }
+
+        func value() async -> Int32 {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if let status {
+                    lock.unlock()
+                    continuation.resume(returning: status)
+                } else {
+                    waiter = continuation
+                    lock.unlock()
+                }
+            }
+        }
     }
 
     /// Run a command with streaming output, returning exit code when done.
