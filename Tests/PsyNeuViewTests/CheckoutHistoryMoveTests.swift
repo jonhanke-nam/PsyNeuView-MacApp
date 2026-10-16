@@ -53,16 +53,32 @@ final class CheckoutHistoryMoveTests: XCTestCase {
         }
     }
 
+    /// Every other process holding one end of a pipe this test process
+    /// has open, plus any git still running: if a command's output never
+    /// closes, whoever else holds the pipe is why.
     private static func gitProcesses() -> String {
-        let ps = Process()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-ax", "-o", "pid,ppid,stat,etime,command"]
-        let pipe = Pipe()
-        ps.standardOutput = pipe
-        try? ps.run()
-        let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        ps.waitUntilExit()
-        return text.split(separator: "\n").filter { $0.contains("git") }.joined(separator: "\n")
+        let me = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        lsof -nP -p \(me) 2>/dev/null | awk '$5=="PIPE"{print $6; sub(/^->/,"",$NF); print $NF}' | sort -u > "$TMPDIR/pipes-\(me)"
+        echo "-- other holders of this process's pipes:"
+        lsof -nP 2>/dev/null | awk -v me=\(me) 'NR==FNR{p[$1];next} $5=="PIPE" && $2!=me && ($6 in p)' "$TMPDIR/pipes-\(me)" -
+        echo "-- git processes:"
+        ps -ax -o pid,ppid,stat,etime,command | grep '[g]it'
+        echo "-- children of this process:"
+        ps -ax -o pid,ppid,stat,etime,command | awk -v me=\(me) '$2==me'
+        """
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", script]
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("holders-\(UUID().uuidString).txt")
+        FileManager.default.createFile(atPath: out.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: out) else { return "(couldn't write the report)" }
+        sh.standardOutput = handle
+        sh.standardError = handle
+        try? sh.run()
+        sh.waitUntilExit()
+        try? handle.close()
+        return (try? String(contentsOf: out, encoding: .utf8)) ?? ""
     }
 
     private func write(_ text: String, to name: String, in dir: URL) throws {
