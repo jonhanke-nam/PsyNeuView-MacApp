@@ -109,6 +109,8 @@ final class Preferences {
     private static let reportSendToKey = "reportSendTo"
     private static let lastMoveOutcomeKey = "lastMoveOutcome"
     private static let tooOldOfferDismissedKey = "tooOldOfferDismissed"
+    private static let includedVersionSeenKey = "includedVersionSeen"
+    private static let olderCheckoutKeptForKey = "olderCheckoutKeptFor"
 
     var repoPath: URL? {
         didSet { save() }
@@ -204,6 +206,19 @@ final class Preferences {
         didSet { save() }
     }
 
+    /// The version of PsyNeuView included with the app at the last launch
+    /// (#16). A different one now means the app was updated.
+    var includedVersionSeen: String {
+        didSet { save() }
+    }
+
+    /// The included version for which "Keep My Checkout" was chosen over a
+    /// newer included PsyNeuView (#16), so launch doesn't ask again until the
+    /// next update.
+    var olderCheckoutKeptFor: String {
+        didSet { save() }
+    }
+
     /// The pip arguments for the current PsyNeuLink configuration.
     var pnlPipArgs: [String] {
         pnlSource.pipInstallArgs(branch: pnlBranch, repo: pnlRepo, localPath: pnlLocalPath)
@@ -246,6 +261,8 @@ final class Preferences {
         self.reportSendTo = defaults.string(forKey: Self.reportSendToKey) ?? ReportDefaults.contactEmail
         self.lastMoveOutcome = defaults.string(forKey: Self.lastMoveOutcomeKey) ?? ""
         self.tooOldOfferDismissed = defaults.string(forKey: Self.tooOldOfferDismissedKey) ?? ""
+        self.includedVersionSeen = defaults.string(forKey: Self.includedVersionSeenKey) ?? ""
+        self.olderCheckoutKeptFor = defaults.string(forKey: Self.olderCheckoutKeptForKey) ?? ""
     }
 
     private func save() {
@@ -266,5 +283,7 @@ final class Preferences {
         defaults.set(reportSendTo, forKey: Self.reportSendToKey)
         defaults.set(lastMoveOutcome, forKey: Self.lastMoveOutcomeKey)
         defaults.set(tooOldOfferDismissed, forKey: Self.tooOldOfferDismissedKey)
+        defaults.set(includedVersionSeen, forKey: Self.includedVersionSeenKey)
+        defaults.set(olderCheckoutKeptFor, forKey: Self.olderCheckoutKeptForKey)
     }
 }
