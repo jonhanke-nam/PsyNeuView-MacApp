@@ -297,7 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         "A refresh step failed; starting with what is on disk. "
                         + "Show Logs has the details.", source: .system, isError: true)
                 }
-                startServices()
+                // After the pull, so a checkout that merely needed one stays.
+                startCheckout(repoPath)
             }
         }
     }
@@ -1850,7 +1851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let decision = BundledUpgrade.decide(
             isGitCheckout: isCheckout, treeVersion: treeVersion, archiveVersion: archiveVersion)
         guard case let .move(version) = decision else {
-            startServices()
+            if isCheckout { startCheckout(current) } else { startServices() }
             return
         }
 
@@ -1905,6 +1906,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             source: .system)
         showStartingWindow()
         startServices()
+    }
+
+    /// Start a checkout, unless it is older than the PsyNeuView included with
+    /// the app (#16): then switch to the included copy straight after an app
+    /// update, and ask on any other launch. Nothing is deleted, and the
+    /// checkout stays on the Settings list for switching back.
+    @MainActor
+    func startCheckout(_ checkout: URL) {
+        let archiveVersion = BundledPsyNeuView.archiveURL()
+            .flatMap { BundledPsyNeuView.version(fromArchiveName: $0.lastPathComponent) }
+        let decision = OlderCheckout.decide(
+            isCheckout: InstallSwitch.kind(of: InstallSwitch.facts(at: checkout)) == .checkout,
+            checkoutVersion: OlderCheckout.declaredVersion(atCheckout: checkout),
+            archiveVersion: archiveVersion,
+            includedVersionSeen: preferences.includedVersionSeen,
+            keptFor: preferences.olderCheckoutKeptFor)
+        if let archiveVersion { preferences.includedVersionSeen = archiveVersion }
+
+        switch decision {
+        case .stay:
+            startServices()
+        case .switchNow(let to, let from):
+            logCollector.add(
+                "The app was updated and includes PsyNeuView \(to); your checkout at "
+                    + "\(checkout.path) is \(from). Switching to the included copy; "
+                    + "the checkout is kept.",
+                source: .system)
+            switchInstall(.useBundled(version: to), notice: OlderCheckout.switchedNotice(to: to, from: from))
+        case .offer(let to, let from):
+            let text = OlderCheckout.offerText(to: to, from: from)
+            let alert = NSAlert()
+            alert.messageText = text.title
+            alert.informativeText = text.detail
+            alert.addButton(withTitle: "Switch to \(to)")
+            alert.addButton(withTitle: "Keep My Checkout")
+            if alert.runModal() == .alertFirstButtonReturn {
+                logCollector.add(
+                    "Switching from your checkout (\(from)) to the included PsyNeuView \(to), as asked.",
+                    source: .system)
+                switchInstall(.useBundled(version: to))
+            } else {
+                preferences.olderCheckoutKeptFor = to
+                logCollector.add(
+                    "Kept your checkout (\(from)) over the included PsyNeuView \(to); "
+                        + "not asking again until the next app update.",
+                    source: .system)
+                startServices()
+            }
+        }
     }
 
     /// After a move to the included version has started and answered (#186),
@@ -2024,7 +2074,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// where it is, and switching back is the same choice. If the switch can't
     /// be made, the install in use starts again and the user is told why — the
     /// app must never be left running nothing.
-    func switchInstall(_ decision: InstallSwitch.Decision) {
+    func switchInstall(_ decision: InstallSwitch.Decision, notice: String? = nil) {
         let previous = preferences.repoPath
         let target: String
         switch decision {
@@ -2048,7 +2098,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .useBundled: beginProgress(ProgressPlan.steps(for: .update))
         default: startupProgress = nil
         }
-        showStartingWindow(status: "Switching to \(target)…")
+        showStartingWindow(status: notice ?? "Switching to \(target)…")
         for window in appWindows { window.close() }
         appWindows.removeAll()
         processManager.stopAll()

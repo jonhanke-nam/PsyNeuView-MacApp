@@ -51,19 +51,22 @@ final class SettingsSnapshotTests: XCTestCase {
             "Send reports to: default (\(ReportDefaults.contactEmail))",
             "Last move to the included PsyNeuView: 2026-10-05 09:12: moved to PsyNeuView 0.5.9",
             "Too-old offer dismissed for: nothing",
+            "Included PsyNeuView at last launch: not recorded",
+            "Older checkout kept over: nothing",
             "Last backend port: 8765",
             "Page preferences kept by the app: 2 (psyneuview.openMenu.sectionOrder, psynewview_ui_prefs)",
             "App update checks: automatic every 24 h, last checked 2026-10-06 14:03",
         ] {
             XCTAssertTrue(lines.contains(expected), "no line \(expected) in \(lines)")
         }
-        XCTAssertEqual(lines.count, 19, "one line per setting")
+        XCTAssertEqual(lines.count, 21, "one line per setting")
 
         let d = SettingsSnapshot.dictionary(Self.values, home: Self.home, timeZone: Self.utc)
         XCTAssertEqual(Set(d.keys), [
             "repoPath", "useBundledApp", "branch", "autoRestart", "launchAtLogin", "developerMode",
             "pnlSource", "pnlBranch", "pnlRepo", "pnlLocalPath", "pnlUpdateOffersMuted", "recentCheckouts",
-            "reportSendWith", "reportSendTo", "lastMoveOutcome", "tooOldOfferDismissed", "lastBackendPort",
+            "reportSendWith", "reportSendTo", "lastMoveOutcome", "tooOldOfferDismissed",
+            "includedVersionSeen", "olderCheckoutKeptFor", "lastBackendPort",
             "pagePreferences", "appUpdateCheck",
         ])
         XCTAssertEqual(d["repoPath"] as? String, "~/Library/Application Support/PsyNeuView/app")
@@ -151,7 +154,7 @@ final class SettingsSnapshotTests: XCTestCase {
         XCTAssertEqual(settings["developerMode"] as? Bool, true)
         XCTAssertEqual(settings["branch"] as? String, "devel")
         XCTAssertEqual(ProblemReport.preview(.settings, of: r, home: Self.home, timeZone: Self.utc)
-            .components(separatedBy: "\n").count, 19)
+            .components(separatedBy: "\n").count, 21)
 
         r.included.remove(.settings)
         let without = ProblemReport.build(r, home: Self.home, timeZone: Self.utc)

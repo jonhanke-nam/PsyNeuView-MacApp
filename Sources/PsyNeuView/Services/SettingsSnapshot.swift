@@ -46,6 +46,10 @@ enum SettingsSnapshot {
         var reportSendTo: String
         var lastMoveOutcome: String
         var tooOldOfferDismissed: String
+        /// The included PsyNeuView at the last launch, and the one an older
+        /// checkout was kept over (#16).
+        var includedVersionSeen: String = ""
+        var olderCheckoutKeptFor: String = ""
         // Elsewhere
         /// `PortChecker.rememberedPort`: the port the backend last used.
         var lastBackendPort: Int?
@@ -87,6 +91,8 @@ enum SettingsSnapshot {
         lines.append("Send reports to: " + sendToDescription(v.reportSendTo))
         lines.append("Last move to the included PsyNeuView: " + (v.lastMoveOutcome.isEmpty ? "none tried" : r(v.lastMoveOutcome)))
         lines.append("Too-old offer dismissed for: " + (v.tooOldOfferDismissed.isEmpty ? "nothing" : r(v.tooOldOfferDismissed)))
+        lines.append("Included PsyNeuView at last launch: " + (v.includedVersionSeen.isEmpty ? "not recorded" : v.includedVersionSeen))
+        lines.append("Older checkout kept over: " + (v.olderCheckoutKeptFor.isEmpty ? "nothing" : v.olderCheckoutKeptFor))
         lines.append("Last backend port: " + (v.lastBackendPort.map(String.init) ?? "none remembered"))
         lines.append(ProblemReport.pagePreferencesLine(v.pagePreferenceKeys.map(r)))
         lines.append("App update checks: " + updateCheckDescription(v.updateCheck, timeZone: timeZone))
@@ -115,6 +121,8 @@ enum SettingsSnapshot {
             "reportSendTo": sendToDescription(v.reportSendTo),
             "lastMoveOutcome": r(v.lastMoveOutcome),
             "tooOldOfferDismissed": r(v.tooOldOfferDismissed),
+            "includedVersionSeen": v.includedVersionSeen,
+            "olderCheckoutKeptFor": v.olderCheckoutKeptFor,
             "lastBackendPort": v.lastBackendPort ?? NSNull(),
             "pagePreferences": ["count": v.pagePreferenceKeys.count, "keys": v.pagePreferenceKeys.map(r)] as [String: Any],
         ]
@@ -172,6 +180,8 @@ extension Preferences {
             reportSendTo: reportSendTo,
             lastMoveOutcome: lastMoveOutcome,
             tooOldOfferDismissed: tooOldOfferDismissed,
+            includedVersionSeen: includedVersionSeen,
+            olderCheckoutKeptFor: olderCheckoutKeptFor,
             lastBackendPort: lastBackendPort,
             pagePreferenceKeys: pagePreferenceKeys,
             updateCheck: updateCheck)
