@@ -91,7 +91,10 @@ enum VersionReport {
         identity: AppIdentity = .release,
         buildCommit: String? = nil,
         bundlePath: String? = nil,
-        dataFolder: String? = nil
+        dataFolder: String? = nil,
+        appBuildDate: Date? = nil,
+        psyNeuViewReleased: Date? = nil,
+        now: Date = Date()
     ) -> [String] {
         var lines: [String] = []
 
@@ -99,8 +102,13 @@ enum VersionReport {
         if let appBuild, appBuild != appVersion {
             first += " (build \(appBuild))"
         }
+        // How recent this app is (#15): when it was built, which for a
+        // release is when it was cut.
+        let built = appBuildDate.map { " " + when($0, now: now) } ?? ""
         if let buildCommit, !buildCommit.isEmpty {
-            first += ", built from commit \(buildCommit)"
+            first += ", built\(built) from commit \(buildCommit)"
+        } else if !built.isEmpty {
+            first += ", built\(built)"
         }
         if identity.isTest {
             first += " — a test build (\(identity.bundleIdentifier))"
@@ -108,7 +116,8 @@ enum VersionReport {
         lines.append(first)
 
         if let psyNeuViewVersion {
-            lines.append("PsyNeuView \(psyNeuViewVersion), included with this app")
+            let released = psyNeuViewReleased.map { ", released " + when($0, now: now) } ?? ""
+            lines.append("PsyNeuView \(psyNeuViewVersion)\(released), included with this app")
         } else if let checkoutPath {
             // Which checkout and which branch: the two things a bug report
             // about a checkout needs, and what #195 asks About to say.
@@ -146,6 +155,35 @@ enum VersionReport {
         }
 
         return lines
+    }
+
+    /// "Oct 15, 2026, 2:33 PM (2 hours ago)": a date people can place, in
+    /// their own time zone, and how long ago it was (#15).
+    static func when(_ date: Date, now: Date = Date(), timeZone: TimeZone = .current) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.timeZone = timeZone
+        f.dateFormat = "MMM d, yyyy, h:mm a"
+        return "\(f.string(from: date)) (\(ago(date, now: now)))"
+    }
+
+    /// "just now", "5 minutes ago", "2 hours ago", "3 days ago".
+    static func ago(_ date: Date, now: Date = Date()) -> String {
+        let s = max(0, Int(now.timeIntervalSince(date).rounded()))
+        func plural(_ n: Int, _ unit: String) -> String { n == 1 ? "1 \(unit)" : "\(n) \(unit)s" }
+        if s < 60 { return "just now" }
+        let m = Int((Double(s) / 60).rounded())
+        if m < 60 { return "\(plural(m, "minute")) ago" }
+        let h = Int((Double(m) / 60).rounded())
+        if h < 48 { return "\(plural(h, "hour")) ago" }
+        return "\(plural(Int((Double(h) / 24).rounded()), "day")) ago"
+    }
+
+    /// When the app was built, stamped into Info.plist as `PNVBuildDate` by
+    /// `make app` (#15); nil for a `swift run` build or one from before #15.
+    static func buildDate(in bundle: Bundle = .main) -> Date? {
+        guard let value = bundle.infoDictionary?["PNVBuildDate"] as? String else { return nil }
+        return ISO8601DateFormatter().date(from: value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// The short commit the app was built from, stamped into Info.plist as

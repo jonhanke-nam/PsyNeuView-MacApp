@@ -242,6 +242,27 @@ final class SettingsBridgeTests: XCTestCase {
         XCTAssertNotNil(snapshot["appUpdate"])
     }
 
+    // MARK: Release dates (#15)
+
+    func testSnapshotSaysWhenTheIncludedPsyNeuViewWasReleased() throws {
+        let host = FakeHost()
+        var snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertTrue((snapshot["install"] as? [String: Any])?["includedReleasedAt"] is NSNull)
+
+        host.install.includedReleasedAt = Date(timeIntervalSince1970: 1_792_173_776)
+        snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual((snapshot["install"] as? [String: Any])?["includedReleasedAt"] as? String,
+                       "2026-10-16T18:02:56Z")
+    }
+
+    func testSnapshotDescribesTheApp() throws {
+        let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: FakeHost())))
+        let app = try XCTUnwrap(snapshot["app"] as? [String: Any])
+        XCTAssertNotNil(app["name"] as? String)
+        // The test bundle has no PNVBuildDate: null, not a made-up date.
+        XCTAssertTrue(app["builtAt"] is NSNull)
+    }
+
     func testSnapshotCarriesThePsyNeuLinkRecord() throws {
         let host = FakeHost()
         let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
