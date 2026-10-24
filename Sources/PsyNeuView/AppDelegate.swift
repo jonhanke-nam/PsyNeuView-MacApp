@@ -1184,6 +1184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let appBuild = bundle.infoDictionary?["CFBundleVersion"] as? String
 
         var psyNeuViewVersion: String?
+        var psyNeuViewReleased: Date?
         var checkoutPath: String?
         var checkoutBranch: String?
         var psyNeuLinkVersion: String?
@@ -1192,6 +1193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch InstallSwitch.kind(of: InstallSwitch.facts(at: repo)) {
             case .bundled(let version):
                 psyNeuViewVersion = version
+                psyNeuViewReleased = BundledPsyNeuView.installedReleaseDate(at: repo)
                 if version == nil { checkoutPath = InstallSwitch.abbreviated(repo.path) }
             case .checkout:
                 checkoutPath = InstallSwitch.abbreviated(repo.path)
@@ -1214,7 +1216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             identity: AppIdentity.current,
             buildCommit: VersionReport.buildCommit(),
             bundlePath: InstallSwitch.abbreviated(bundle.bundlePath),
-            dataFolder: InstallSwitch.abbreviated(BundledPsyNeuView.supportDirectory().path)
+            dataFolder: InstallSwitch.abbreviated(BundledPsyNeuView.supportDirectory().path),
+            appBuildDate: VersionReport.buildDate(),
+            psyNeuViewReleased: psyNeuViewReleased
         )
 
         // Our own window rather than orderFrontStandardAboutPanel, so the text

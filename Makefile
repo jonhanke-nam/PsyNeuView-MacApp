@@ -25,6 +25,10 @@ TEST_APP := .build/PsyNeuView Test.app
 # PNVBuildCommit so About can say it (#209). "unknown" outside a checkout.
 BUILD_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
+# When the bundle was built, in UTC, stamped as PNVBuildDate so About can say
+# how recent this app is (#15). A release is built when it is cut.
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
 clean:
 	swift package clean
 	rm -rf .build PsyNeuView-*.dmg .dmg-staging Resources/python-* Resources/psyneuview-*.tar.gz Resources/uv-*
@@ -76,6 +80,7 @@ app: release python-runtime psyneuview-bundle uv-runtime
 	@install_name_tool -add_rpath @executable_path/../Frameworks $(APP)/Contents/MacOS/PsyNeuView 2>/dev/null || true
 	@# Which commit this is, for About and for Report a Problem (#209).
 	@/usr/libexec/PlistBuddy -c "Add :PNVBuildCommit string $(BUILD_COMMIT)" $(APP)/Contents/Info.plist
+	@/usr/libexec/PlistBuddy -c "Add :PNVBuildDate string $(BUILD_DATE)" $(APP)/Contents/Info.plist
 	@echo "Built $(APP) — run \`make install\` to put it in /Applications"
 
 # Build "PsyNeuView Test.app": the same build with the test identity (#209).

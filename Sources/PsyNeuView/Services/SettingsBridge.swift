@@ -119,6 +119,9 @@ enum SettingsBridge {
         /// The version this app carries, if this build has one.
         var includedVersion: String?
         var recentCheckouts: [String]
+        /// When the included version was released (#15), once it is unpacked
+        /// and its BUNDLED_VERSION says.
+        var includedReleasedAt: Date? = nil
     }
 
     struct Failure: Error, Equatable {
@@ -229,8 +232,10 @@ enum SettingsBridge {
                 "choice": choiceName,
                 "checkoutPath": checkoutPath,
                 "includedVersion": install.includedVersion ?? NSNull(),
+                "includedReleasedAt": install.includedReleasedAt.map(AppUpdateWatch.iso8601) ?? NSNull(),
                 "recentCheckouts": install.recentCheckouts,
             ] as [String: Any],
+            "app": appInfo(),
             "autoRestart": host.autoRestart,
             "launchAtLogin": host.launchAtLogin,
             "developerMode": host.developerMode,
@@ -239,6 +244,19 @@ enum SettingsBridge {
             "reportSendToDefault": ReportDefaults.contactEmail,
             "appUpdate": host.appUpdate(),
             "pnlRecord": host.pnlRecord,
+        ]
+    }
+
+    /// This app's version, build and build date, for Settings ▸ About (#15).
+    /// `builtAt` is an ISO 8601 time in UTC, or null for a build with no
+    /// PNVBuildDate (`swift run`, or from before #15).
+    static func appInfo(bundle: Bundle = .main) -> [String: Any] {
+        let info = bundle.infoDictionary ?? [:]
+        return [
+            "name": AppIdentity.current.displayName,
+            "version": info["CFBundleShortVersionString"] as? String ?? NSNull(),
+            "build": info["CFBundleVersion"] as? String ?? NSNull(),
+            "builtAt": VersionReport.buildDate(in: bundle).map(AppUpdateWatch.iso8601) ?? NSNull(),
         ]
     }
 

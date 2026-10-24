@@ -149,10 +149,24 @@ enum BundledPsyNeuView {
     /// changes (jonhanke-nam/PsyNeuView-archive#1073). So "which PsyNeuView is this?"
     /// has to be answerable some other way, which is this. (#57)
     static func installedVersion(at directory: URL) -> String? {
+        stampValue("version", at: directory)
+    }
+
+    /// When the PsyNeuView in an unpacked tree was released: the `released=`
+    /// line `fetch-psyneuview.sh` writes, the date of the commit its tag
+    /// points to (#15). Nil for a tree from before #15, or when the lookup
+    /// failed at build time.
+    static func installedReleaseDate(at directory: URL) -> Date? {
+        guard let value = stampValue("released", at: directory) else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    /// One `key=value` line of BUNDLED_VERSION, or nil if absent or empty.
+    static func stampValue(_ key: String, at directory: URL) -> String? {
         let stamp = directory.appendingPathComponent("BUNDLED_VERSION")
         guard let contents = try? String(contentsOf: stamp, encoding: .utf8) else { return nil }
-        for line in contents.split(separator: "\n") where line.hasPrefix("version=") {
-            let value = line.dropFirst("version=".count).trimmingCharacters(in: .whitespaces)
+        for line in contents.split(separator: "\n") where line.hasPrefix("\(key)=") {
+            let value = line.dropFirst(key.count + 1).trimmingCharacters(in: .whitespaces)
             return value.isEmpty ? nil : value
         }
         return nil

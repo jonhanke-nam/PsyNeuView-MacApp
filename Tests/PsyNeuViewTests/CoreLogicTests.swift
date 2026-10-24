@@ -965,6 +965,25 @@ final class BundledVersionStampTests: XCTestCase {
         XCTAssertNil(BundledPsyNeuView.installedVersion(at: tree))
     }
 
+    /// #15: the release date fetch-psyneuview.sh writes beside the version.
+    func testReadsTheReleaseDate() throws {
+        let tree = try makeTree(stamp: "version=0.6.2\nref=v0.6.2\nrepo=jonhanke-nam/PsyNeuView\nreleased=2026-10-16T18:02:56Z\n")
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertEqual(BundledPsyNeuView.installedVersion(at: tree), "0.6.2")
+        XCTAssertEqual(BundledPsyNeuView.installedReleaseDate(at: tree),
+                       Date(timeIntervalSince1970: 1_792_173_776))
+    }
+
+    /// A stamp from before #15, or a failed lookup (`released=`), has no date.
+    func testNoReleaseDateMeansNone() throws {
+        for stamp in ["version=0.6.2\nref=v0.6.2\n", "version=0.6.2\nreleased=\n", "version=0.6.2\nreleased=soon\n"] {
+            let tree = try makeTree(stamp: stamp)
+            defer { try? FileManager.default.removeItem(at: tree) }
+            XCTAssertNil(BundledPsyNeuView.installedReleaseDate(at: tree), "stamp: \(stamp.debugDescription)")
+            XCTAssertEqual(BundledPsyNeuView.installedVersion(at: tree), "0.6.2")
+        }
+    }
+
     func testMalformedStampMeansUnknown() throws {
         for stamp in ["ref=v0.5.0\n", "version=\n", ""] {
             let tree = try makeTree(stamp: stamp)
@@ -1433,5 +1452,47 @@ final class UserModelStorageTests: XCTestCase {
     func testRescueIsSafeWhenThereIsNoTree() {
         XCTAssertTrue(BundledPsyNeuView.rescueUserModels(
             fromTree: URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)")).isEmpty)
+    }
+}
+
+/// About says when the app was built and the bundled PsyNeuView released (#15).
+final class AboutDatesTests: XCTestCase {
+    private let utc = TimeZone(identifier: "UTC")!
+    private let built = Date(timeIntervalSince1970: 1_792_089_180)    // 2026-10-15T18:33:00Z
+    private let released = Date(timeIntervalSince1970: 1_792_173_776) // 2026-10-16T18:02:56Z
+
+    func testWhenGivesTheDateTimeAndHowLongAgo() {
+        let now = built.addingTimeInterval(2 * 3600)
+        XCTAssertEqual(VersionReport.when(built, now: now, timeZone: utc), "Oct 15, 2026, 6:33 PM (2 hours ago)")
+    }
+
+    func testAgoInPlainWords() {
+        XCTAssertEqual(VersionReport.ago(built, now: built.addingTimeInterval(30)), "just now")
+        XCTAssertEqual(VersionReport.ago(built, now: built.addingTimeInterval(60)), "1 minute ago")
+        XCTAssertEqual(VersionReport.ago(built, now: built.addingTimeInterval(5 * 86_400)), "5 days ago")
+        XCTAssertEqual(VersionReport.ago(built, now: built.addingTimeInterval(-60)), "just now")
+    }
+
+    func testAboutSaysWhenTheAppWasBuiltAndPsyNeuViewReleased() {
+        let now = released.addingTimeInterval(3600)
+        let lines = VersionReport.aboutLines(
+            appVersion: "0.6.2", appBuild: "0.6.2", psyNeuViewVersion: "0.6.2", checkoutPath: nil,
+            psyNeuLinkVersion: nil, psyNeuLinkSource: nil, availableSources: [],
+            identity: .release, buildCommit: "abc1234",
+            appBuildDate: built, psyNeuViewReleased: released, now: now)
+        XCTAssertTrue(lines[0].hasPrefix("PsyNeuView app 0.6.2, built "), lines[0])
+        XCTAssertTrue(lines[0].hasSuffix(" (25 hours ago) from commit abc1234"), lines[0])
+        XCTAssertTrue(lines[1].hasPrefix("PsyNeuView 0.6.2, released "), lines[1])
+        XCTAssertTrue(lines[1].hasSuffix(" (1 hour ago), included with this app"), lines[1])
+    }
+
+    func testAboutWithoutACommitStillSaysWhenBuilt() {
+        let lines = VersionReport.aboutLines(
+            appVersion: "0.6.2", appBuild: nil, psyNeuViewVersion: "0.6.2", checkoutPath: nil,
+            psyNeuLinkVersion: nil, psyNeuLinkSource: nil, availableSources: [],
+            appBuildDate: built, now: built)
+        XCTAssertTrue(lines[0].hasPrefix("PsyNeuView app 0.6.2, built "), lines[0])
+        XCTAssertTrue(lines[0].hasSuffix(" (just now)"), lines[0])
+        XCTAssertEqual(lines[1], "PsyNeuView 0.6.2, included with this app")
     }
 }

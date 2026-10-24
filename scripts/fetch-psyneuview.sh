@@ -60,10 +60,20 @@ rm -rf "${STAGE}/backend/.venv" "${STAGE}/backend/__pycache__"
 find "${STAGE}" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "${STAGE}" -name "*.pyc" -delete 2>/dev/null || true
 
+# When that PsyNeuView was released: the date of the commit the tag points to,
+# so About can say how recent it is (#15). Best effort: a failed lookup leaves
+# it empty and About leaves the date out.
+RELEASED="$(curl -fsSL "${AUTH[@]+"${AUTH[@]}"}" \
+    "https://api.github.com/repos/${PSYNEUVIEW_REPO}/commits/${PSYNEUVIEW_REF}" 2>/dev/null \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["committer"]["date"])' 2>/dev/null \
+    || true)"
+[ -n "${RELEASED}" ] || echo "  (couldn't look up when ${PSYNEUVIEW_REF} was released; About will leave the date out)"
+
 cat > "${STAGE}/BUNDLED_VERSION" <<VERSION
 version=${PSYNEUVIEW_VERSION}
 ref=${PSYNEUVIEW_REF}
 repo=${PSYNEUVIEW_REPO}
+released=${RELEASED}
 VERSION
 
 mkdir -p Resources

@@ -87,7 +87,10 @@ final class AppSettingsHost: SettingsBridgeHost {
             running: InstallSwitch.describeRunning(current),
             choice: choice,
             includedVersion: archiveVersion,
-            recentCheckouts: recent)
+            recentCheckouts: recent,
+            includedReleasedAt: archiveVersion.flatMap {
+                BundledPsyNeuView.installedReleaseDate(at: BundledPsyNeuView.installDirectory(version: $0))
+            })
     }
 
     func decide(_ choice: InstallSwitch.Choice) -> InstallSwitch.Decision {
