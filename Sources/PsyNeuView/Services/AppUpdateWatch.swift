@@ -9,11 +9,13 @@ import Sparkle
 /// notice; the app only supplies the state, through the `pnvSettings` bridge
 /// (`appUpdate` in its snapshot, `installUpdate` to act on it).
 enum AppUpdateWatch {
-    /// The update Sparkle found: its version as people read it, and where its
-    /// release notes are, if the feed names them.
+    /// The update Sparkle found: its version as people read it, where its
+    /// release notes are, if the feed names them, and when it was released
+    /// (the feed's `<pubDate>`, #15), if the feed says.
     struct Found: Equatable {
         var version: String
         var releaseNotesURL: String?
+        var releasedAt: Date? = nil
     }
 
     /// An update is waiting when Sparkle found one newer than what is running.
@@ -25,9 +27,10 @@ enum AppUpdateWatch {
         return compare(found.version, running) == .orderedDescending
     }
 
-    /// The bridge's `appUpdate` value: `{available, version, releaseNotesURL}`
-    /// when an update is waiting, otherwise `{available: false}`. Older pages
-    /// ignore the key; older apps never send it.
+    /// The bridge's `appUpdate` value: `{available, version, releaseNotesURL,
+    /// releasedAt}` when an update is waiting, otherwise `{available: false}`.
+    /// `releasedAt` is an ISO 8601 time in UTC, or null when the feed has no
+    /// date (#15). Older pages ignore the keys; older apps never send them.
     static func bridgeValue(running: String, found: Found?) -> [String: Any] {
         guard isWaiting(running: running, found: found), let found else {
             return ["available": false]
@@ -36,7 +39,16 @@ enum AppUpdateWatch {
             "available": true,
             "version": found.version,
             "releaseNotesURL": found.releaseNotesURL ?? NSNull(),
+            "releasedAt": found.releasedAt.map(iso8601) ?? NSNull(),
         ]
+    }
+
+    /// "2026-10-15T18:33:00Z": what the page parses.
+    static func iso8601(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f.string(from: date)
     }
 
     /// Dotted numeric versions ("0.5.22" < "0.6.0" < "0.6.10"). A part that
@@ -69,7 +81,8 @@ final class AppUpdateObserver: NSObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let found = AppUpdateWatch.Found(
             version: item.displayVersionString,
-            releaseNotesURL: item.releaseNotesURL?.absoluteString)
+            releaseNotesURL: item.releaseNotesURL?.absoluteString,
+            releasedAt: item.date)
         DispatchQueue.main.async { self.onChange?(found) }
     }
 
