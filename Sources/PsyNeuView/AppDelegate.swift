@@ -145,6 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsHost.onAutoRestartChanged = { [weak self] on in self?.processManager.autoRestart = on }
         settingsHost.onDeveloperModeChanged = { [weak self] _ in self?.refreshCodeUpdateVisibility() }
         settingsHost.onSwitchInstall = { [weak self] decision in self?.switchInstall(decision) }
+        appUpdateObserver.receiveCandidates = { [weak self] in
+            self?.preferences.receiveReleaseCandidates ?? false
+        }
+        settingsHost.onReleaseCandidatesChanged = { [weak self] _ in
+            guard let self, AppIdentity.current.updatesEnabled else { return }
+            // A quiet check: no window. A found candidate (or none, after
+            // turning it off) reaches the page through onChange below.
+            self.sparkleUpdater.updater.checkForUpdateInformation()
+        }
         settingsHost.onInstallAppUpdate = { [weak self] in self?.sparkleUpdater.checkForUpdates(nil) }
         settingsHost.onSyncPsyNeuLinkSource = { [weak self] in
             guard let self else { return }
