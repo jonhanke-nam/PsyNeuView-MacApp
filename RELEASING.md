@@ -112,6 +112,24 @@ the `pnvSettings` bridge — are in the README's *Settings and native UI*
 section, and `NativeWindowPolicyTests` (run by `swift test` above) enforces the
 native-window list ([PsyNeuView-archive#1279](https://github.com/jonhanke-nam/PsyNeuView-archive/issues/1279)).
 
+## Release candidates
+
+A release can be tried first by the people who ask for it, through the same
+update notice everyone uses. In PsyNeuView, Settings > Developer > "Get release
+candidates" turns it on (the app keeps the setting; Sparkle reads it).
+
+- Version: `0.6.5-rc1` in `CFBundleShortVersionString`, `0.6.5rc1` (no dash)
+  in `CFBundleVersion`. Sparkle compares `CFBundleVersion` and stops reading at
+  a dash, so without the dash it orders 0.6.4 < 0.6.5rc1 < 0.6.5rc2 < 0.6.5.
+  The release workflow refuses a build version that isn't the short version
+  without dashes.
+- Tag: `v0.6.5-rc1` (annotated, as always). The workflow publishes it as a
+  GitHub pre-release, and `update-appcast.sh` adds its appcast item with
+  `<sparkle:channel>candidates</sparkle:channel>`. Apps without the setting
+  never see items on that channel.
+- Promote: bump to `0.6.5` / `0.6.5` and tag `v0.6.5` as a normal release.
+  Everyone, candidate testers included, is offered it.
+
 ## Cutting a release (after secrets are set up)
 
 Releases are cut from `jonhanke-devel`. `main` is dormant in this repo — the
