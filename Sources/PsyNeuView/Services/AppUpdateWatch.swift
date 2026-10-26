@@ -16,6 +16,30 @@ enum AppUpdateWatch {
         var version: String
         var releaseNotesURL: String?
         var releasedAt: Date? = nil
+        /// Posted to the release-candidates channel: a test version, offered
+        /// only to people who asked for candidates.
+        var isCandidate: Bool = false
+    }
+
+    /// The Sparkle channel release candidates are posted to. An appcast item
+    /// with `<sparkle:channel>candidates</sparkle:channel>` is invisible to an
+    /// updater that does not allow this channel (Sparkle's own filtering), so
+    /// people who never turn the setting on never see a candidate.
+    static let candidatesChannel = "candidates"
+
+    /// The channels Sparkle may look in. The default channel is always
+    /// included by Sparkle itself; an empty set means "default only".
+    static func allowedChannels(receiveCandidates: Bool) -> Set<String> {
+        receiveCandidates ? [candidatesChannel] : []
+    }
+
+    /// Candidate versions are written "0.6.5-rc1" for people (the tag is
+    /// v0.6.5-rc1) and "0.6.5rc1" for Sparkle, whose comparator stops reading
+    /// at a dash, so to it "0.6.5-rc1" would be the same as "0.6.5" and the
+    /// final release would never be offered over its candidate. Without the
+    /// dash it reads "0.6.4" < "0.6.5rc1" < "0.6.5rc2" < "0.6.5".
+    static func sparkleVersion(_ version: String) -> String {
+        version.replacingOccurrences(of: "-", with: "")
     }
 
     /// An update is waiting when Sparkle found one newer than what is running.
@@ -40,6 +64,7 @@ enum AppUpdateWatch {
             "version": found.version,
             "releaseNotesURL": found.releaseNotesURL ?? NSNull(),
             "releasedAt": found.releasedAt.map(iso8601) ?? NSNull(),
+            "candidate": found.isCandidate,
         ]
     }
 
@@ -51,19 +76,12 @@ enum AppUpdateWatch {
         return f.string(from: date)
     }
 
-    /// Dotted numeric versions ("0.5.22" < "0.6.0" < "0.6.10"). A part that
-    /// isn't a number compares as 0, so "0.6.0-beta" reads as 0.6.0.
+    /// Versions in Sparkle's own order, so the page agrees with what Sparkle
+    /// offers: "0.5.22" < "0.6.0" < "0.6.10", and a release candidate sits
+    /// between the release before it and its own final release:
+    /// "0.6.4" < "0.6.5-rc1" < "0.6.5-rc2" < "0.6.5".
     static func compare(_ a: String, _ b: String) -> ComparisonResult {
-        let parts = { (s: String) -> [Int] in
-            s.split(whereSeparator: { $0 == "." || $0 == "-" || $0 == " " })
-                .map { Int($0) ?? 0 }
-        }
-        let x = parts(a), y = parts(b)
-        for i in 0..<max(x.count, y.count) {
-            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
-            if l != r { return l < r ? .orderedAscending : .orderedDescending }
-        }
-        return .orderedSame
+        SUStandardVersionComparator.default.compareVersion(sparkleVersion(a), toVersion: sparkleVersion(b))
     }
 
     /// The version this app is.
@@ -77,12 +95,20 @@ enum AppUpdateWatch {
 final class AppUpdateObserver: NSObject, SPUUpdaterDelegate {
     /// Called on the main thread with the newest finding (nil: none waiting).
     var onChange: ((AppUpdateWatch.Found?) -> Void)?
+    /// Whether the person asked for release candidates (Settings > Developer).
+    /// Read on every check, so a change takes effect at the next one.
+    var receiveCandidates: () -> Bool = { false }
+
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        AppUpdateWatch.allowedChannels(receiveCandidates: receiveCandidates())
+    }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let found = AppUpdateWatch.Found(
             version: item.displayVersionString,
             releaseNotesURL: item.releaseNotesURL?.absoluteString,
-            releasedAt: item.date)
+            releasedAt: item.date,
+            isCandidate: item.channel == AppUpdateWatch.candidatesChannel)
         DispatchQueue.main.async { self.onChange?(found) }
     }
 

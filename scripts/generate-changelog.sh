@@ -36,9 +36,10 @@ trap 'rm -f "$TMP"' EXIT
     echo
 } > "$TMP"
 
+# Release candidates are left out: they are tests, not releases.
 # Newest first. `gh release list` already sorts that way; we re-sort by version
 # so a hand-made release out of chronological order still lands correctly.
-TAGS="$(gh release list --repo "$REPO" --limit 200 --json tagName --jq '.[].tagName' | sort -Vr)"
+TAGS="$(gh release list --repo "$REPO" --limit 200 --exclude-pre-releases --json tagName --jq '.[].tagName' | sort -Vr)"
 
 [ -n "$TAGS" ] || { echo "error: no releases found in $REPO" >&2; exit 1; }
 

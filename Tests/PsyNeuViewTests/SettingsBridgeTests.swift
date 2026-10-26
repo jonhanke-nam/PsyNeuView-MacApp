@@ -27,6 +27,8 @@ final class SettingsBridgeTests: XCTestCase {
             return nil
         }
         func setDeveloperMode(_ on: Bool) { developerMode = on }
+        var receiveReleaseCandidates = false
+        func setReceiveReleaseCandidates(_ on: Bool) { receiveReleaseCandidates = on }
         func setReportSendWith(_ route: String) { reportSendWith = route }
         func setReportSendTo(_ address: String) { reportSendTo = address }
         func installState() -> SettingsBridge.InstallState { install }
@@ -62,6 +64,7 @@ final class SettingsBridgeTests: XCTestCase {
         XCTAssertEqual(snapshot["autoRestart"] as? Bool, true)
         XCTAssertEqual(snapshot["launchAtLogin"] as? Bool, false)
         XCTAssertEqual(snapshot["developerMode"] as? Bool, false)
+        XCTAssertEqual(snapshot["receiveReleaseCandidates"] as? Bool, false)
         XCTAssertEqual(snapshot["reportSendWith"] as? String, "ask")
         XCTAssertEqual(snapshot["reportSendTo"] as? String, "")
         XCTAssertEqual(snapshot["reportSendToDefault"] as? String, ReportDefaults.contactEmail)
@@ -94,6 +97,11 @@ final class SettingsBridgeTests: XCTestCase {
 
         _ = SettingsBridge.handle(["op": "set", "key": "developerMode", "value": true], host: host)
         XCTAssertTrue(host.developerMode)
+
+        let c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "set", "key": "receiveReleaseCandidates", "value": true], host: host)))
+        XCTAssertTrue(host.receiveReleaseCandidates)
+        XCTAssertEqual(c["receiveReleaseCandidates"] as? Bool, true)
     }
 
     func testARefusedLoginItemRejectsWithTheReason() {

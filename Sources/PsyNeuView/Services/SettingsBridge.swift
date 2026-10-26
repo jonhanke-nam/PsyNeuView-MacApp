@@ -11,6 +11,9 @@ protocol SettingsBridgeHost: AnyObject {
     /// Nil when done, or why macOS refused.
     func setLaunchAtLogin(_ on: Bool) -> String?
     func setDeveloperMode(_ on: Bool)
+    /// Whether the app update notice also offers release candidates.
+    var receiveReleaseCandidates: Bool { get }
+    func setReceiveReleaseCandidates(_ on: Bool)
     /// Report a Problem's two settings (#202), already checked by the bridge.
     var reportSendWith: String { get }
     var reportSendTo: String { get }
@@ -46,6 +49,7 @@ protocol SettingsBridgeHost: AnyObject {
 ///     { op: "get" }                                  -> Snapshot
 ///     { op: "set", key, value: boolean }             -> Snapshot
 ///         key: "autoRestart" | "launchAtLogin" | "developerMode"
+///            | "receiveReleaseCandidates"
 ///     { op: "set", key, value: string }              -> Snapshot
 ///         key: "reportSendWith" ("ask" | "mail" | "outlook" | "gmail")
 ///            | "reportSendTo"   (an email address, or "" for none)
@@ -62,13 +66,16 @@ protocol SettingsBridgeHost: AnyObject {
 ///
 ///     Snapshot = { install: { running, choice, checkoutPath, includedVersion,
 ///                             recentCheckouts }, autoRestart, launchAtLogin,
-///                  developerMode, reportSendWith, reportSendTo,
+///                  developerMode, receiveReleaseCandidates, reportSendWith, reportSendTo,
 ///                  reportSendToDefault, appUpdate, pnlRecord }
 ///         pnlRecord = "github:<branch>" | "pypi" | "local:<path>"
 ///           (#9; the app's record of the PsyNeuLink source, absent from apps
 ///            before it)
 ///         appUpdate = { available: false }
-///                   | { available: true, version, releaseNotesURL | null }
+///                   | { available: true, version, releaseNotesURL | null,
+///                       releasedAt | null, candidate }
+///           (candidate: true for a release candidate, which the app only
+///            finds when receiveReleaseCandidates is on)
 ///           (#6; absent from apps before it, so the page treats a missing
 ///            key as "no update waiting")
 ///         (reportSendToDefault: who reports go to when "Send to" is empty,
@@ -91,6 +98,8 @@ enum SettingsBridge {
     /// list against its copy of the inventory.
     static let macAppKeys = [
         "install", "autoRestart", "launchAtLogin", "reportSendWith", "reportSendTo",
+        // Shown in Developer, inside the Mac app only; Sparkle reads it.
+        "receiveReleaseCandidates",
     ]
 
     /// How Report a Problem may offer to send a report (#202). "ask" shows
@@ -179,6 +188,8 @@ enum SettingsBridge {
                 if let why = host.setLaunchAtLogin(value) { return fail(why) }
             case "developerMode":
                 host.setDeveloperMode(value)
+            case "receiveReleaseCandidates":
+                host.setReceiveReleaseCandidates(value)
             case "install":
                 return fail("pnvSettings: switch installs with 'switchInstall'")
             default:
@@ -239,6 +250,7 @@ enum SettingsBridge {
             "autoRestart": host.autoRestart,
             "launchAtLogin": host.launchAtLogin,
             "developerMode": host.developerMode,
+            "receiveReleaseCandidates": host.receiveReleaseCandidates,
             "reportSendWith": host.reportSendWith,
             "reportSendTo": host.reportSendTo,
             "reportSendToDefault": ReportDefaults.contactEmail,

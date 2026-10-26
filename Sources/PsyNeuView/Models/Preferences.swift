@@ -97,6 +97,7 @@ final class Preferences {
     private static let autoRestartKey = "autoRestart"
     private static let launchAtLoginKey = "launchAtLogin"
     private static let developerModeKey = "developerMode"
+    private static let receiveReleaseCandidatesKey = "receiveReleaseCandidates"
     private static let useBundledAppKey = "useBundledApp"
     private static let branchKey = "branch"
     private static let pnlSourceKey = "pnlSource"
@@ -134,6 +135,12 @@ final class Preferences {
     }
 
     var developerMode: Bool {
+        didSet { save() }
+    }
+    /// Offer release candidates through the normal app update notice
+    /// (Settings > Developer). Off by default: only people testing a release
+    /// before everyone gets it turn this on.
+    var receiveReleaseCandidates: Bool {
         didSet { save() }
     }
     /// The PsyNeuView branch to track. Defaults to "devel" (the active,
@@ -248,6 +255,7 @@ final class Preferences {
         self.autoRestart = defaults.bool(forKey: Self.autoRestartKey)
         self.launchAtLogin = defaults.bool(forKey: Self.launchAtLoginKey)
         self.developerMode = defaults.bool(forKey: Self.developerModeKey)
+        self.receiveReleaseCandidates = defaults.bool(forKey: Self.receiveReleaseCandidatesKey)
         // Absent means a fresh install, which should get the bundled app.
         self.useBundledApp = defaults.object(forKey: Self.useBundledAppKey) as? Bool ?? true
         self.branch = defaults.string(forKey: Self.branchKey) ?? "devel"
@@ -271,6 +279,7 @@ final class Preferences {
         defaults.set(autoRestart, forKey: Self.autoRestartKey)
         defaults.set(launchAtLogin, forKey: Self.launchAtLoginKey)
         defaults.set(developerMode, forKey: Self.developerModeKey)
+        defaults.set(receiveReleaseCandidates, forKey: Self.receiveReleaseCandidatesKey)
         defaults.set(useBundledApp, forKey: Self.useBundledAppKey)
         defaults.set(branch, forKey: Self.branchKey)
         defaults.set(pnlSource.rawValue, forKey: Self.pnlSourceKey)

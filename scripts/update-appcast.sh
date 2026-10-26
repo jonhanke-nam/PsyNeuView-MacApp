@@ -23,6 +23,24 @@ SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist 2>/dev/null || echo "0.1.0")
 DMG_NAME="PsyNeuView-${VERSION}.dmg"
 TAG="v${VERSION}"
+# What Sparkle compares with the installed app's CFBundleVersion. For a release
+# candidate ("0.6.5-rc1") this is "0.6.5rc1": Sparkle stops reading a version
+# at a dash, so with the dash the final 0.6.5 would look no newer than its
+# candidate and never be offered.
+BUILD_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist 2>/dev/null || echo "${VERSION}")
+
+# A release candidate goes to the "candidates" channel only. Sparkle hides
+# channel items from every app that hasn't asked for that channel, so only
+# people with Settings > Developer > "Get release candidates" on see it. Its
+# GitHub release is marked as a pre-release, so "latest" stays the final.
+CHANNEL_XML=""
+PRERELEASE=()
+if [[ "${VERSION}" == *-rc* ]]; then
+    CHANNEL_XML="
+            <sparkle:channel>candidates</sparkle:channel>"
+    PRERELEASE=(--prerelease)
+    echo "  ${VERSION} is a release candidate: candidates channel only."
+fi
 
 if [ ! -f "${DMG_NAME}" ]; then
     echo "Error: ${DMG_NAME} not found. Build the DMG first."
@@ -93,12 +111,14 @@ if gh release view "${TAG}" --repo "${REPO_OWNER}/${RELEASES_REPO}" >/dev/null 2
     gh release edit "${TAG}" \
         --repo "${REPO_OWNER}/${RELEASES_REPO}" \
         --title "PsyNeuView ${VERSION}" \
-        --notes-file "${NOTES_FILE}"
+        --notes-file "${NOTES_FILE}" \
+        ${PRERELEASE[@]+"${PRERELEASE[@]}"}
 else
     gh release create "${TAG}" "${DMG_NAME}" \
         --repo "${REPO_OWNER}/${RELEASES_REPO}" \
         --title "PsyNeuView ${VERSION}" \
-        --notes-file "${NOTES_FILE}"
+        --notes-file "${NOTES_FILE}" \
+        ${PRERELEASE[@]+"${PRERELEASE[@]}"}
 fi
 
 # Clone the releases repo into a temp directory.
@@ -126,8 +146,8 @@ ITEM="        <item>
             <description><![CDATA[
 ${RELEASE_HTML}
             ]]></description>
-            <pubDate>${PUB_DATE}</pubDate>
-            <sparkle:version>${VERSION}</sparkle:version>
+            <pubDate>${PUB_DATE}</pubDate>${CHANNEL_XML}
+            <sparkle:version>${BUILD_VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url=\"${DOWNLOAD_URL}\"

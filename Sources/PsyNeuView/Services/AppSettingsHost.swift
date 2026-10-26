@@ -11,6 +11,10 @@ final class AppSettingsHost: SettingsBridgeHost {
     /// The App menu shows or hides its developer item as soon as the mode
     /// changes (#214).
     var onDeveloperModeChanged: ((Bool) -> Void)?
+    /// Asks Sparkle again, quietly, so turning release candidates on or off
+    /// shows (or clears) a waiting candidate without waiting for the next
+    /// scheduled check.
+    var onReleaseCandidatesChanged: ((Bool) -> Void)?
     /// Stops PsyNeuView, switches to the chosen install and starts it. The
     /// services belong to the app delegate, so it does this.
     var onSwitchInstall: ((InstallSwitch.Decision) -> Void)?
@@ -55,6 +59,14 @@ final class AppSettingsHost: SettingsBridgeHost {
     func setDeveloperMode(_ on: Bool) {
         preferences.developerMode = on
         onDeveloperModeChanged?(on)
+    }
+
+    var receiveReleaseCandidates: Bool { preferences.receiveReleaseCandidates }
+
+    func setReceiveReleaseCandidates(_ on: Bool) {
+        guard preferences.receiveReleaseCandidates != on else { return }
+        preferences.receiveReleaseCandidates = on
+        onReleaseCandidatesChanged?(on)
     }
 
     var reportSendWith: String { preferences.reportSendWith }

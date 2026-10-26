@@ -72,6 +72,21 @@ jobs:
             echo "Tag $TAG does not match Info.plist version v$VERSION" >&2
             exit 1
           fi
+          # Release candidates: tag v0.6.5-rc1, CFBundleShortVersionString
+          # 0.6.5-rc1, CFBundleVersion 0.6.5rc1. Sparkle compares
+          # CFBundleVersion and stops reading at a dash, so the build version
+          # must be the short version without its dashes, or the final 0.6.5
+          # would never be offered over its candidate.
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist)
+          if [ "$BUILD" != "${VERSION//-/}" ]; then
+            echo "CFBundleVersion $BUILD should be ${VERSION//-/} (the version without dashes)" >&2
+            exit 1
+          fi
+          case "$VERSION" in
+            *-rc[0-9]*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *-*) echo "Version $VERSION: the only suffix a release takes is -rcN" >&2; exit 1 ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "dmg=PsyNeuView-${VERSION}.dmg" >> "$GITHUB_OUTPUT"
@@ -254,8 +269,12 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           DMG: ${{ steps.version.outputs.dmg }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           set -euo pipefail
+          # A release candidate is a pre-release, so it is never "latest".
+          PRE=()
+          [ "$PRERELEASE" = "true" ] && PRE=(--prerelease)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$DMG" --clobber
           else
@@ -268,7 +287,8 @@ jobs:
             [ -n "$TITLE" ] || TITLE="PsyNeuView ${VERSION}"
             gh release create "$TAG" "$DMG" \
               --title "$TITLE" \
-              --notes-file "$RUNNER_TEMP/notes.md"
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              ${PRE[@]+"${PRE[@]}"}
           fi
 
       - name: Regenerate the public changelog
