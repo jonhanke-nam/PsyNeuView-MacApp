@@ -98,6 +98,8 @@ enum SettingsBridge {
     /// list against its copy of the inventory.
     static let macAppKeys = [
         "install", "autoRestart", "launchAtLogin", "reportSendWith", "reportSendTo",
+        // Shown in Developer, inside the Mac app only; Sparkle reads it.
+        "receiveReleaseCandidates",
     ]
 
     /// How Report a Problem may offer to send a report (#202). "ask" shows
@@ -109,10 +111,7 @@ enum SettingsBridge {
     /// own storage doesn't survive a relaunch inside the app (each launch
     /// serves the page from a new port, so a new origin), and because the app
     /// needs it before the page loads (the backend's `--reload`).
-    ///
-    /// "Get release candidates" is a Developer setting in PsyNeuView's
-    /// Settings for the same reason; the app keeps it because Sparkle reads it.
-    static let pageOwnedKeys = ["developerMode", "receiveReleaseCandidates"]
+    static let pageOwnedKeys = ["developerMode"]
 
     static let changedEvent = "pnv:mac-settings-changed"
     static let openSettingsEvent = "pnv:open-settings"

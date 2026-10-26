@@ -116,6 +116,7 @@ final class NativeWindowPolicyTests: XCTestCase {
     /// checked out here — so change both together.
     static let inventoryMacAppKeys: Set<String> = [
         "install", "autoRestart", "launchAtLogin", "reportSendWith", "reportSendTo",
+        "receiveReleaseCandidates",
     ]
 
     func testBridgeKeysMatchTheInventory() {
