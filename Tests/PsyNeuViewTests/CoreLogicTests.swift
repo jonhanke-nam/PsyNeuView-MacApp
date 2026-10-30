@@ -666,6 +666,10 @@ final class BundledPsyNeuViewTests: XCTestCase {
         XCTAssertEqual(
             BundledPsyNeuView.version(fromArchiveName: "psyneuview-1.2.0.tar.gz"),
             "1.2.0")
+        // A candidate keeps its tag's suffix, so each one unpacks afresh.
+        XCTAssertEqual(
+            BundledPsyNeuView.version(fromArchiveName: "psyneuview-0.6.9-rc4.tar.gz"),
+            "0.6.9-rc4")
     }
 
     func testNonArchiveNamesAreRejected() {

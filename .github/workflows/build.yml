@@ -25,6 +25,12 @@ jobs:
       # The parsing pnv-status relies on, against fixed inputs (#209).
       - name: pnv-status self-test
         run: ./scripts/pnv-status --self-test
+      # The bundled PsyNeuView's version must spell out its tag, or an app
+      # update can keep running the PsyNeuView already installed.
+      - name: bundled PsyNeuView version names its tag
+        run: |
+          ./scripts/check-pin-identity.sh --self-test
+          ./scripts/check-pin-identity.sh
 
       # Measure how long the app takes to start, and fail if it is creeping
       # toward the ceiling (#104).

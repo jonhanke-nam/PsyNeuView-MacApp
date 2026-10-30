@@ -140,6 +140,8 @@ against `jonhanke-devel` for the same reason.
 ```bash
 # 1. Point the bundle at the PsyNeuView release it should ship.
 #    scripts/psyneuview-pin.conf, PSYNEUVIEW_REF + PSYNEUVIEW_VERSION.
+#    PSYNEUVIEW_VERSION is the tag without its "v" (v0.6.9-rc3 -> 0.6.9-rc3);
+#    ./scripts/check-pin-identity.sh refuses anything else.
 #
 #    Check the tag's contents, not just its name: a tag cut before a version
 #    bump merged still carries the old literal, and the app would then report
