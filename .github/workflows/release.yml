@@ -21,7 +21,7 @@ on:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     permissions:
       contents: write
@@ -102,6 +102,11 @@ jobs:
       # The app is only as good as the PsyNeuView inside it, and its tests
       # say nothing about that code. Refuse a pinned PsyNeuView that isn't on
       # devel or didn't pass every suite there (#174).
+      # Each bundled tag needs its own version, or updating from one candidate
+      # to the next (or to the final) keeps the PsyNeuView already installed.
+      - name: The bundled PsyNeuView's version names its tag
+        run: ./scripts/check-pin-identity.sh
+
       - name: The bundled PsyNeuView passed its full checks
         env:
           GH_TOKEN: ${{ secrets.PSYNEUVIEW_REPO_TOKEN || github.token }}

@@ -17,6 +17,27 @@ final class BundledUpgradeTests: XCTestCase {
             .stay)
     }
 
+    func testTheNextCandidateMoves() {
+        // 0.6.7-rc3 shipped v0.6.9-rc3 stamped "0.6.9", the same as rc1's, so
+        // it stayed on rc1's code. Each tag now has its own version.
+        XCTAssertEqual(
+            BundledUpgrade.decide(isGitCheckout: false, treeVersion: "0.6.9-rc1", archiveVersion: "0.6.9-rc3"),
+            .move(to: "0.6.9-rc3"))
+    }
+
+    func testTheFinalMovesFromItsCandidate() {
+        XCTAssertEqual(
+            BundledUpgrade.decide(isGitCheckout: false, treeVersion: "0.6.9-rc3", archiveVersion: "0.6.9"),
+            .move(to: "0.6.9"))
+    }
+
+    func testACandidateMovesFromAnInstallStampedWithoutItsTag() {
+        // The installs rc1 to rc3 left behind, stamped plain "0.6.9".
+        XCTAssertEqual(
+            BundledUpgrade.decide(isGitCheckout: false, treeVersion: "0.6.9", archiveVersion: "0.6.9-rc4"),
+            .move(to: "0.6.9-rc4"))
+    }
+
     func testAGitCheckoutIsNeverMoved() {
         // A developer's clone updates by pulling, whatever the app carries.
         XCTAssertEqual(
