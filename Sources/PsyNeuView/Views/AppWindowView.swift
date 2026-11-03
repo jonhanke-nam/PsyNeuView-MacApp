@@ -16,6 +16,9 @@ struct AppWindowView: NSViewRepresentable {
     /// The app's store of the page's own preferences (#218). Nil leaves the
     /// page's `localStorage` alone, as before.
     var pagePreferences: PagePreferencesStore? = nil
+    /// Opens another PsyNeuView window for the page (PsyNeuView#172). Nil
+    /// leaves the bridge out, and the page doesn't offer one.
+    var openWindow: ((URL) -> Void)? = nil
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -55,6 +58,12 @@ struct AppWindowView: NSViewRepresentable {
                 context.coordinator, contentWorld: .page, name: PagePreferences.handlerName)
         }
 
+        // Another window for the page; see WindowBridge. No reply.
+        if openWindow != nil {
+            config.userContentController.add(
+                context.coordinator, contentWorld: .page, name: WindowBridge.handlerName)
+        }
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -86,7 +95,7 @@ struct AppWindowView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(settingsHost: settingsHost, pagePreferences: pagePreferences)
+        Coordinator(settingsHost: settingsHost, pagePreferences: pagePreferences, openWindow: openWindow)
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
@@ -112,10 +121,15 @@ struct AppWindowView: NSViewRepresentable {
         private var pageLoaded = false
         private var openSettingsPending = false
         private let pagePreferences: PagePreferencesStore?
+        private let openWindow: ((URL) -> Void)?
 
-        init(settingsHost: AppSettingsHost?, pagePreferences: PagePreferencesStore?) {
+        init(
+            settingsHost: AppSettingsHost?, pagePreferences: PagePreferencesStore?,
+            openWindow: ((URL) -> Void)?
+        ) {
             self.settingsHost = settingsHost
             self.pagePreferences = pagePreferences
+            self.openWindow = openWindow
         }
 
         // MARK: pnvPrefs (#218)
@@ -125,6 +139,14 @@ struct AppWindowView: NSViewRepresentable {
         func userContentController(
             _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
         ) {
+            if message.name == WindowBridge.handlerName {
+                if let url = WindowBridge.allowedURL(
+                    body: message.body, isMainFrame: message.frameInfo.isMainFrame, page: message.webView?.url)
+                {
+                    MainActor.assumeIsolated { openWindow?(url) }
+                }
+                return
+            }
             guard message.name == PagePreferences.handlerName, let store = pagePreferences else { return }
             let body = message.body
             MainActor.assumeIsolated {

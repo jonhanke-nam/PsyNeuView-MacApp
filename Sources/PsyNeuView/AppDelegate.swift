@@ -1450,7 +1450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settingsWanted = openSettingsWhenWindowOpens
         let webView = AppWindowView(
             url: url, settingsHost: settingsHost, openSettingsOnLoad: settingsWanted,
-            pagePreferences: pagePreferences)
+            pagePreferences: pagePreferences,
+            openWindow: { [weak self] in self?.openAppWindow(url: $0) })
         openSettingsWhenWindowOpens = false
         let hostingView = NSHostingView(rootView: webView)
 
