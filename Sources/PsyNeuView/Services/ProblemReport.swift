@@ -337,11 +337,11 @@ enum ProblemReport {
             ? page.map { PageDiagnostics.activityText($0.activityLines, home: home) } : nil
         let previousPageActivity = includes(r, .previousPageActivity)
             ? page.map { PageDiagnostics.activityText($0.previousActivityLines, home: home) } : nil
-        // The timeline carries this launch's log whether or not logs.txt is
-        // included: the log is what the sender ticked or not; the timeline is
-        // its own part, and the sender can leave that out instead.
+        // A log the sender left out goes nowhere in the report: the timeline
+        // then has the page's lines alone, and says so.
         let timeline = includes(r, .timeline)
-            ? page.map { ReportTimeline.text(page: $0.timeline, log: r.logLines, timeZone: timeZone, home: home) } : nil
+            ? page.map { ReportTimeline.text(page: $0.timeline, log: r.logLines, logIncluded: includes(r, .logs),
+                                             timeZone: timeZone, home: home) } : nil
         let settings = includes(r, .settings) ? r.settings : nil
         let saved = timestamp(r.date, timeZone: timeZone)
 
@@ -423,9 +423,10 @@ enum ProblemReport {
             md.append("- activity-previous-launch.txt: PsyNeuView's activity in the previous launch, from the copy it keeps on this Mac")
         }
         if timeline != nil {
-            md.append("- timeline.txt: what the user did, what PsyNeuView did, errors, every wait's start and stop, "
-                      + "and the server log, in time order, each line marked with its source; times are local, "
-                      + "the health check left out")
+            md.append("- timeline.txt: what the user did, what PsyNeuView did, errors, every wait's start and stop"
+                      + (includes(r, .logs) ? ", and the server log" : "")
+                      + ", in time order, each line marked with its source; times are local"
+                      + (includes(r, .logs) ? ", the health check left out" : "; no server lines, since the log was left out"))
         }
         if page == nil {
             md.append("- No PsyNeuView diagnostics: \(clean(r.page.note))")
@@ -539,7 +540,8 @@ enum ProblemReport {
             return logPreview(page.previousActivityLines, home: home)
         case .timeline:
             guard let page = r.page.provided, !page.timeline.isEmpty else { return r.page.note }
-            let text = ReportTimeline.text(page: page.timeline, log: r.logLines, timeZone: timeZone, home: home)
+            let text = ReportTimeline.text(page: page.timeline, log: r.logLines, logIncluded: includes(r, .logs),
+                                           timeZone: timeZone, home: home)
             let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             return logPreview(lines.last == "" ? Array(lines.dropLast()) : lines, home: home)
         case .system:

@@ -52,12 +52,12 @@ final class PageDiagnosticsTests: XCTestCase {
     /// began with `?`; either is read now.
     func testAnEntrysTimeIsTimeOrT() {
         let lines = PageDiagnostics.activityLines([
-            ["t": "2026-11-03T16:00:17.058Z", "time": "2026-11-03T16:00:17.058Z", "kind": "menu", "text": "Open menu opened"],
+            ["t": "2026-11-03T16:00:17.058Z", "time": "2026-11-03T16:00:17.058Z", "kind": "menu", "text": "Open menu opened"] as [String: Any],
             ["t": "2026-11-03T16:00:17.059Z", "kind": "wait", "text": "GET /api/psyneulink-examples · stopped 2026-11-03T16:00:17.088Z · 0.029 s · ok · from: Open menu opened",
              "data": ["label": "GET /api/psyneulink-examples", "durationMs": 29] as [String: Any]] as [String: Any],
             ["t": 1_791_295_262_000, "kind": "run", "text": "Run finished: 3 trials"] as [String: Any],
             ["t": NSNull(), "time": "2026-11-03T16:00:18.000Z", "kind": "menu", "text": "null t, time given"] as [String: Any],
-        ])
+        ] as [Any])
         XCTAssertEqual(lines, [
             "2026-11-03T16:00:17.058Z · menu · Open menu opened",
             "2026-11-03T16:00:17.059Z · wait · GET /api/psyneulink-examples · stopped 2026-11-03T16:00:17.088Z · 0.029 s · ok · from: Open menu opened",
@@ -122,14 +122,20 @@ final class PageDiagnosticsTests: XCTestCase {
         // The View buttons show the same, newest lines first in the usual way.
         XCTAssertTrue(ProblemReport.preview(.timeline, of: r, home: Self.home, timeZone: Self.utc).contains("action   Open › Stroop"))
         XCTAssertTrue(ProblemReport.preview(.previousPageActivity, of: r, home: Self.home).contains("Open › Earlier"))
-        // Each can be left out on its own; the timeline is its own part, so
-        // leaving the log out doesn't empty it.
+        // Each can be left out on its own. A log the sender unticked goes
+        // nowhere in the report: the timeline then has no server lines.
         r.included.remove(.logs)
         r.included.remove(.previousPageActivity)
         let fewer = ReportSamples.build(r)
         XCTAssertNil(fewer.logs)
         XCTAssertNil(fewer.previousPageActivity)
-        XCTAssertTrue(fewer.timeline!.contains("server   Backend · [perf] introspect: 0.4s"))
+        let fewerTimeline = try XCTUnwrap(fewer.timeline)
+        XCTAssertFalse(fewerTimeline.contains("introspect"), fewerTimeline)
+        XCTAssertFalse(fewerTimeline.contains("server "), fewerTimeline)
+        XCTAssertTrue(fewerTimeline.contains("# No server log lines: the sender left this launch's log out of the report."))
+        XCTAssertTrue(fewerTimeline.contains("action   Open › Stroop"))
+        XCTAssertTrue(fewer.markdown.contains("no server lines, since the log was left out"))
+        XCTAssertFalse(ProblemReport.preview(.timeline, of: r, home: Self.home, timeZone: Self.utc).contains("introspect"))
         XCTAssertTrue(fewer.markdown.contains("Left out by the sender: This launch's whole log; PsyNeuView's activity in the previous launch."))
     }
 

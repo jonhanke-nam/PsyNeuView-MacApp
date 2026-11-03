@@ -111,7 +111,7 @@ enum ReportTimeline {
 
     /// The header says what the file is and which clock it uses, so a file
     /// read on its own still makes sense.
-    static func header(timeZone: TimeZone, serverLines: Int, pageLines: Int) -> [String] {
+    static func header(timeZone: TimeZone, serverLines: Int, pageLines: Int, logIncluded: Bool = true) -> [String] {
         let name = timeZone.identifier
         let offset = timeZone.secondsFromGMT()
         let sign = offset < 0 ? "-" : "+"
@@ -122,8 +122,10 @@ enum ReportTimeline {
             "# Times are local to this Mac: \(name) (UTC\(sign)\(hh):\(mm)). "
                 + "Sources: action · event · error · message · wait · page · server.",
         ]
-        if serverLines == 0 {
-            lines.append("# No server log lines: the server log wasn't included, or had nothing but routine lines.")
+        if !logIncluded {
+            lines.append("# No server log lines: the sender left this launch's log out of the report.")
+        } else if serverLines == 0 {
+            lines.append("# No server log lines: the log had nothing but routine lines.")
         } else {
             lines.append("# Routine server lines (the health check) are left out; logs.txt has every line.")
         }
@@ -133,15 +135,18 @@ enum ReportTimeline {
         return lines
     }
 
-    /// The whole file, redacted like the rest of the report.
+    /// The whole file, redacted like the rest of the report. With
+    /// `logIncluded` false (the sender unticked logs.txt) no server line
+    /// goes in: a part left out of the report is sent nowhere in it.
     static func text(
         page: [PageDiagnostics.TimelineEntry],
         log: [String],
+        logIncluded: Bool = true,
         timeZone: TimeZone = .current,
         home: String = NSHomeDirectory()
     ) -> String {
         let pageLines = pageLines(page)
-        let server = serverLines(log, timeZone: timeZone)
+        let server = logIncluded ? serverLines(log, timeZone: timeZone) : []
         var lines = merged(page: pageLines, server: server)
         var note: String? = nil
         if lines.count > maxLines {
@@ -149,7 +154,7 @@ enum ReportTimeline {
             lines = Array(lines.suffix(maxLines))
         }
         let formatter = logFormatter(timeZone)
-        var out = header(timeZone: timeZone, serverLines: server.count, pageLines: pageLines.count)
+        var out = header(timeZone: timeZone, serverLines: server.count, pageLines: pageLines.count, logIncluded: logIncluded)
         if let note { out.append(note) }
         out.append(contentsOf: lines.map { ProblemReport.redact(format($0, formatter: formatter), home: home) })
         return out.joined(separator: "\n") + "\n"

@@ -11,14 +11,14 @@ final class ReportTimelineTests: XCTestCase {
     static let newYork = TimeZone(identifier: "America/New_York")!
 
     /// What a page built for PsyNeuView#177 answers, in UTC: the #175 case.
-    static let page: [[String: Any]] = [
-        ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "Open menu opened"],
-        ["t": "2026-11-03T14:15:04.855Z", "source": "wait", "text": "start · GET /api/psyneulink-examples/status · from: Open menu opened"],
-        ["t": "2026-11-03T14:15:20.000Z", "source": "action", "text": "Open › Cohen Huston1994"],
-        ["t": "2026-11-03T14:15:20.100Z", "source": "wait", "text": "start · POST /api/model/load · likely from: Open › Cohen Huston1994"],
-        ["t": "2026-11-03T14:15:21.100Z", "source": "wait", "text": "stop · POST /api/model/load · 1.000 s · ok"],
-        ["t": "2026-11-03T14:15:21.200Z", "source": "error", "text": "Error shown: Example model failed to load · likely from: Open › Cohen Huston1994"],
-        ["t": "2026-11-03T14:16:35.000Z", "source": "wait", "text": "stop · GET /api/psyneulink-examples/status · 90.145 s · ok"],
+    static let page: [Any] = [
+        ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "Open menu opened"] as [String: Any],
+        ["t": "2026-11-03T14:15:04.855Z", "source": "wait", "text": "start · GET /api/psyneulink-examples/status · from: Open menu opened"] as [String: Any],
+        ["t": "2026-11-03T14:15:20.000Z", "source": "action", "text": "Open › Cohen Huston1994"] as [String: Any],
+        ["t": "2026-11-03T14:15:20.100Z", "source": "wait", "text": "start · POST /api/model/load · likely from: Open › Cohen Huston1994"] as [String: Any],
+        ["t": "2026-11-03T14:15:21.100Z", "source": "wait", "text": "stop · POST /api/model/load · 1.000 s · ok"] as [String: Any],
+        ["t": "2026-11-03T14:15:21.200Z", "source": "error", "text": "Error shown: Example model failed to load · likely from: Open › Cohen Huston1994"] as [String: Any],
+        ["t": "2026-11-03T14:16:35.000Z", "source": "wait", "text": "stop · GET /api/psyneulink-examples/status · 90.145 s · ok"] as [String: Any],
     ]
 
     /// The same minutes in the launch log, in New York time (UTC-5 in November).
@@ -34,7 +34,7 @@ final class ReportTimelineTests: XCTestCase {
         "[2026-11-03 09:16:34.990] [System] still waiting for the examples status",
     ]
 
-    static func entries(_ page: [[String: Any]]) -> [PageDiagnostics.TimelineEntry] {
+    static func entries(_ page: [Any]) -> [PageDiagnostics.TimelineEntry] {
         PageDiagnostics.timelineEntries(page)
     }
 
@@ -65,23 +65,34 @@ final class ReportTimelineTests: XCTestCase {
 
     func testAtTheSameInstantThePageComesFirstAndEachKeepsItsOrder() {
         let page = Self.entries([
-            ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "first"],
-            ["t": "2026-11-03T14:15:04.850Z", "source": "event", "text": "second"],
-        ])
+            ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "first"] as [String: Any],
+            ["t": "2026-11-03T14:15:04.850Z", "source": "event", "text": "second"] as [String: Any],
+        ] as [Any])
         let log = ["[2026-11-03 09:15:04.850] [Backend] third", "[2026-11-03 09:15:04.850] [Backend] fourth"]
         let merged = ReportTimeline.merged(page: ReportTimeline.pageLines(page),
                                            server: ReportTimeline.serverLines(log, timeZone: Self.newYork))
-        XCTAssertEqual(merged.map(\.text), ["first", "second", "Backend · third", "Backend · fourth"])
+        XCTAssertEqual(merged.map { $0.text }, ["first", "second", "Backend · third", "Backend · fourth"])
     }
 
     func testWithNoServerLinesThePagesPartStillReads() {
         let text = ReportTimeline.text(page: Self.entries(Self.page), log: [], timeZone: TimeZone(identifier: "UTC")!)
-        XCTAssertTrue(text.contains("# No server log lines: the server log wasn't included, or had nothing but routine lines."))
+        XCTAssertTrue(text.contains("# No server log lines: the log had nothing but routine lines."))
         XCTAssertTrue(text.contains("2026-11-03 14:15:04.850  action   Open menu opened\n"))
         XCTAssertFalse(text.contains("server "))
         // And a log of nothing but the health check is the same as none.
         let routine = ReportTimeline.text(page: Self.entries(Self.page), log: [Self.log[1]], timeZone: TimeZone(identifier: "UTC")!)
         XCTAssertTrue(routine.contains("# No server log lines"))
+    }
+
+    /// The sender unticked logs.txt: the log goes nowhere in the report, so
+    /// not into the timeline either, and the file says why it has none.
+    func testWhenTheLogIsLeftOutOfTheReportTheTimelineHasNoServerLines() {
+        let text = ReportTimeline.text(page: Self.entries(Self.page), log: Self.log, logIncluded: false,
+                                       timeZone: TimeZone(identifier: "UTC")!, home: "/Users/someone")
+        XCTAssertTrue(text.contains("# No server log lines: the sender left this launch's log out of the report."), text)
+        XCTAssertFalse(text.contains("server "), text)
+        XCTAssertFalse(text.contains("Uvicorn"), text)
+        XCTAssertTrue(text.contains("2026-11-03 14:15:04.850  action   Open menu opened\n"))
     }
 
     func testWithNoPageLinesTheFileSaysSo() {
@@ -91,20 +102,20 @@ final class ReportTimelineTests: XCTestCase {
     }
 
     func testThePagesTimesAreReadAsISOOrEpochAndBadOnesLeftOut() {
-        let entries = Self.entries([
-            ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "iso with fractions"],
-            ["t": "2026-11-03T14:15:05Z", "source": "action", "text": "iso without"],
-            ["time": 1_793_715_306_500, "source": "action", "text": "epoch milliseconds, under time"],
-            ["t": "yesterday", "source": "action", "text": "unreadable"],
-            ["source": "action", "text": "no time"],
+        let entries: [PageDiagnostics.TimelineEntry] = Self.entries([
+            ["t": "2026-11-03T14:15:04.850Z", "source": "action", "text": "iso with fractions"] as [String: Any],
+            ["t": "2026-11-03T14:15:05Z", "source": "action", "text": "iso without"] as [String: Any],
+            ["time": 1_793_715_306_500, "source": "action", "text": "epoch milliseconds, under time"] as [String: Any],
+            ["t": "yesterday", "source": "action", "text": "unreadable"] as [String: Any],
+            ["source": "action", "text": "no time"] as [String: Any],
             "not an object",
-        ])
-        XCTAssertEqual(entries.map(\.text), ["iso with fractions", "iso without", "epoch milliseconds, under time"])
+        ] as [Any])
+        XCTAssertEqual(entries.map { $0.text }, ["iso with fractions", "iso without", "epoch milliseconds, under time"])
         XCTAssertEqual(entries.map { $0.time.timeIntervalSince1970 }, [1_793_715_304.85, 1_793_715_305, 1_793_715_306.5])
     }
 
     func testTheLatestLinesAreKeptWhenThereAreTooMany() {
-        let many = (1...(ReportTimeline.maxLines + 3)).map {
+        let many: [Any] = (1...(ReportTimeline.maxLines + 3)).map {
             ["t": "2026-11-03T14:15:04.850Z", "source": "event", "text": "\($0)"] as [String: Any]
         }
         let text = ReportTimeline.text(page: Self.entries(many), log: [], timeZone: TimeZone(identifier: "UTC")!)
