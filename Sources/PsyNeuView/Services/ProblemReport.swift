@@ -73,6 +73,8 @@ enum ProblemReport {
         case previousLogs
         case pageState
         case pageActivity
+        case previousPageActivity
+        case timeline
         case system
 
         var id: String { rawValue }
@@ -87,6 +89,8 @@ enum ProblemReport {
                 return "The previous launch's log (this launch is under \(Int(ProblemReport.shortLaunch / 60)) minutes old)"
             case .pageState: return "PsyNeuView's state, as the page reported it"
             case .pageActivity: return "PsyNeuView's activity since launch"
+            case .previousPageActivity: return "PsyNeuView's activity in the previous launch"
+            case .timeline: return "One timeline: what you did, errors, waits and the server log, in time order"
             case .system: return "macOS version and Mac model"
             }
         }
@@ -98,6 +102,8 @@ enum ProblemReport {
             case .previousLogs: return "logs-previous-launch.txt"
             case .pageState: return "page-state.json"
             case .pageActivity: return "activity.txt"
+            case .previousPageActivity: return "activity-previous-launch.txt"
+            case .timeline: return "timeline.txt"
             default: return nil
             }
         }
@@ -255,6 +261,10 @@ enum ProblemReport {
         var pageState: String?
         /// `activity.txt`, when the page provided it (#208).
         var pageActivity: String?
+        /// `activity-previous-launch.txt`, when the page had the previous launch's (PsyNeuView#177).
+        var previousPageActivity: String?
+        /// `timeline.txt`: the page's timeline merged with the log (PsyNeuView#177).
+        var timeline: String?
 
         /// The files in the folder, in the order written: what `ReportWriter`
         /// saves and what the report lists.
@@ -264,6 +274,8 @@ enum ProblemReport {
             if previousLogs != nil { names.append(Part.previousLogs.fileName!) }
             if pageState != nil { names.append(Part.pageState.fileName!) }
             if pageActivity != nil { names.append(Part.pageActivity.fileName!) }
+            if previousPageActivity != nil { names.append(Part.previousPageActivity.fileName!) }
+            if timeline != nil { names.append(Part.timeline.fileName!) }
             names.append("diagnostics.json")
             return names
         }
@@ -298,6 +310,9 @@ enum ProblemReport {
             case .previousLogs: return r.previousLogLines != nil
             case .settings: return r.settings != nil
             case .pageState, .pageActivity: return r.page.provided != nil
+            case .previousPageActivity: return !(r.page.provided?.previousActivityLines.isEmpty ?? true)
+            // The merge needs the page's lines; the log alone is logs.txt.
+            case .timeline: return !(r.page.provided?.timeline.isEmpty ?? true)
             default: return true
             }
         }
@@ -320,6 +335,13 @@ enum ProblemReport {
         let pageState = includes(r, .pageState) ? page.map { clean($0.stateJSON) + "\n" } : nil
         let pageActivity = includes(r, .pageActivity)
             ? page.map { PageDiagnostics.activityText($0.activityLines, home: home) } : nil
+        let previousPageActivity = includes(r, .previousPageActivity)
+            ? page.map { PageDiagnostics.activityText($0.previousActivityLines, home: home) } : nil
+        // The timeline carries this launch's log whether or not logs.txt is
+        // included: the log is what the sender ticked or not; the timeline is
+        // its own part, and the sender can leave that out instead.
+        let timeline = includes(r, .timeline)
+            ? page.map { ReportTimeline.text(page: $0.timeline, log: r.logLines, timeZone: timeZone, home: home) } : nil
         let settings = includes(r, .settings) ? r.settings : nil
         let saved = timestamp(r.date, timeZone: timeZone)
 
@@ -372,7 +394,9 @@ enum ProblemReport {
             logs: logs.map { $0.joined(separator: "\n") + "\n" },
             previousLogs: previousLogs.map { $0.joined(separator: "\n") + "\n" },
             pageState: pageState,
-            pageActivity: pageActivity)
+            pageActivity: pageActivity,
+            previousPageActivity: previousPageActivity,
+            timeline: timeline)
         md.append("")
         md.append("## In this folder")
         md.append("")
@@ -392,7 +416,16 @@ enum ProblemReport {
             md.append("- page-state.json: PsyNeuView's state, as the page reported it (diagnostics version \(page?.version ?? 0))")
         }
         if pageActivity != nil {
-            md.append("- activity.txt: PsyNeuView's activity since launch, one line per entry: time · kind · text")
+            md.append("- activity.txt: PsyNeuView's activity since launch, one line per entry: time · kind · text"
+                      + (page?.actionLogging == false ? " (action logging was off: what the user did isn't in it)" : ""))
+        }
+        if previousPageActivity != nil {
+            md.append("- activity-previous-launch.txt: PsyNeuView's activity in the previous launch, from the copy it keeps on this Mac")
+        }
+        if timeline != nil {
+            md.append("- timeline.txt: what the user did, what PsyNeuView did, errors, every wait's start and stop, "
+                      + "and the server log, in time order, each line marked with its source; times are local, "
+                      + "the health check left out")
         }
         if page == nil {
             md.append("- No PsyNeuView diagnostics: \(clean(r.page.note))")
@@ -421,6 +454,7 @@ enum ProblemReport {
                 "provided": page != nil,
                 "version": page?.version ?? NSNull(),
                 "note": page == nil ? clean(r.page.note) : NSNull(),
+                "actionLogging": page?.actionLogging ?? NSNull(),
             ] as [String: Any],
         ]
         if let settings {
@@ -498,6 +532,16 @@ enum ProblemReport {
         case .pageActivity:
             guard let page = r.page.provided else { return r.page.note }
             return logPreview(page.activityLines, home: home)
+        case .previousPageActivity:
+            guard let page = r.page.provided, !page.previousActivityLines.isEmpty else {
+                return "(no previous launch's activity)"
+            }
+            return logPreview(page.previousActivityLines, home: home)
+        case .timeline:
+            guard let page = r.page.provided, !page.timeline.isEmpty else { return r.page.note }
+            let text = ReportTimeline.text(page: page.timeline, log: r.logLines, timeZone: timeZone, home: home)
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            return logPreview(lines.last == "" ? Array(lines.dropLast()) : lines, home: home)
         case .system:
             return "macOS: \(f.macOSVersion)\nModel: \(f.macModel)"
         }
