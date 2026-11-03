@@ -55,8 +55,9 @@ final class ReportTimelineTests: XCTestCase {
             "2026-11-03 09:15:20.100  wait     start · POST /api/model/load · likely from: Open › Cohen Huston1994",
             "2026-11-03 09:15:21.100  wait     stop · POST /api/model/load · 1.000 s · ok",
             "2026-11-03 09:15:21.150  server   Backend [error] · Traceback (most recent call last):",
-            "2026-11-03 09:15:21.150  server     File \"~/code/model.py\", line 3, in <module>",
-            "2026-11-03 09:15:21.150  server   ValueError: no such mechanism",
+            // The rest of the traceback: indented, with the first line's time.
+            "2026-11-03 09:15:21.150  server       File \"~/code/model.py\", line 3, in <module>",
+            "2026-11-03 09:15:21.150  server     ValueError: no such mechanism",
             "2026-11-03 09:15:21.200  error    Error shown: Example model failed to load · likely from: Open › Cohen Huston1994",
             "2026-11-03 09:16:34.990  server   System · still waiting for the examples status",
             "2026-11-03 09:16:35.000  wait     stop · GET /api/psyneulink-examples/status · 90.145 s · ok",
@@ -78,7 +79,7 @@ final class ReportTimelineTests: XCTestCase {
         let text = ReportTimeline.text(page: Self.entries(Self.page), log: [], timeZone: TimeZone(identifier: "UTC")!)
         XCTAssertTrue(text.contains("# No server log lines: the log had nothing but routine lines."))
         XCTAssertTrue(text.contains("2026-11-03 14:15:04.850  action   Open menu opened\n"))
-        XCTAssertFalse(text.contains("server "))
+        XCTAssertFalse(text.contains("  server   "))
         // And a log of nothing but the health check is the same as none.
         let routine = ReportTimeline.text(page: Self.entries(Self.page), log: [Self.log[1]], timeZone: TimeZone(identifier: "UTC")!)
         XCTAssertTrue(routine.contains("# No server log lines"))
@@ -90,7 +91,7 @@ final class ReportTimelineTests: XCTestCase {
         let text = ReportTimeline.text(page: Self.entries(Self.page), log: Self.log, logIncluded: false,
                                        timeZone: TimeZone(identifier: "UTC")!, home: "/Users/someone")
         XCTAssertTrue(text.contains("# No server log lines: the sender left this launch's log out of the report."), text)
-        XCTAssertFalse(text.contains("server "), text)
+        XCTAssertFalse(text.contains("  server   "), text)
         XCTAssertFalse(text.contains("Uvicorn"), text)
         XCTAssertTrue(text.contains("2026-11-03 14:15:04.850  action   Open menu opened\n"))
     }
@@ -98,7 +99,8 @@ final class ReportTimelineTests: XCTestCase {
     func testWithNoPageLinesTheFileSaysSo() {
         let text = ReportTimeline.text(page: [], log: [Self.log[0]], timeZone: TimeZone(identifier: "UTC")!)
         XCTAssertTrue(text.contains("# No lines from PsyNeuView's page: it didn't provide a timeline (older version or not loaded)."))
-        XCTAssertTrue(text.contains("2026-11-03 14:14:19.779  server   Backend · INFO:"))
+        // Read and written in the same zone, the log's time comes out as it went in.
+        XCTAssertTrue(text.contains("2026-11-03 09:14:19.779  server   Backend · INFO:"), text)
     }
 
     func testThePagesTimesAreReadAsISOOrEpochAndBadOnesLeftOut() {

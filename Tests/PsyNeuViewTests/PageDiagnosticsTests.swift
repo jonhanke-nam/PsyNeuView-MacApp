@@ -101,7 +101,7 @@ final class PageDiagnosticsTests: XCTestCase {
 
         """)
         let timeline = try XCTUnwrap(files.timeline)
-        XCTAssertTrue(timeline.contains("# Times are local to this Mac: UTC (UTC+00:00)."), timeline)
+        XCTAssertTrue(timeline.contains("# Times are local to this Mac: ") && timeline.contains(" (UTC+00:00). Sources:"), timeline)
         XCTAssertTrue(timeline.contains("""
         2026-10-06 14:00:01.000  action   Open › Stroop
         2026-10-06 14:00:01.050  wait     start · POST /api/model/load · from: Open › Stroop
@@ -131,7 +131,7 @@ final class PageDiagnosticsTests: XCTestCase {
         XCTAssertNil(fewer.previousPageActivity)
         let fewerTimeline = try XCTUnwrap(fewer.timeline)
         XCTAssertFalse(fewerTimeline.contains("introspect"), fewerTimeline)
-        XCTAssertFalse(fewerTimeline.contains("server "), fewerTimeline)
+        XCTAssertFalse(fewerTimeline.contains("  server   "), fewerTimeline)
         XCTAssertTrue(fewerTimeline.contains("# No server log lines: the sender left this launch's log out of the report."))
         XCTAssertTrue(fewerTimeline.contains("action   Open › Stroop"))
         XCTAssertTrue(fewer.markdown.contains("no server lines, since the log was left out"))
