@@ -9,14 +9,20 @@ final class WindowBridgeTests: XCTestCase {
     }
 
     func testOpensAnAddressOnThePagesOwnOrigin() {
-        let tour = "http://127.0.0.1:65200/?tour=ddm"
-        XCTAssertEqual(allowed(tour, page: page)?.absoluteString, tour)
+        // Each address the page asks for (PsyNeuView#174).
+        for address in [
+            "http://127.0.0.1:65200/?tour=ddm", "http://127.0.0.1:65200/?openModel=Hopfield%20Network",
+            "http://127.0.0.1:65200/?newModel=1", "http://127.0.0.1:65200/?open=0123abcd",
+        ] {
+            XCTAssertEqual(allowed(address, page: page)?.absoluteString, address)
+        }
     }
 
     func testRefusesAnyOtherOrigin() {
         for other in [
             "https://example.com/", "http://127.0.0.1:65201/", "http://localhost:65200/",
             "https://127.0.0.1:65200/", "file:///etc/hosts",
+            "http://127.0.0.1:65200@example.com/",
         ] {
             XCTAssertNil(allowed(other, page: page), other)
         }
