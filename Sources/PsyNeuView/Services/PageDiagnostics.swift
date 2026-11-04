@@ -12,9 +12,15 @@ import Foundation
 /// diagnostics.
 ///
 /// What's attached: `page-state.json` (the state, pretty-printed and
-/// redacted) and `activity.txt` (one line per entry: time · kind · text).
-/// The parsing and formatting are pure, so they are tested from sample
-/// values without a web view.
+/// redacted), `activity.txt` (one line per entry: time · kind · text),
+/// and since PsyNeuView#177 `activity-previous-launch.txt` (the previous
+/// launch's saved log) and `timeline.txt` (the page's `timeline` merged
+/// with the server log; ReportTimeline.swift). The parsing and formatting
+/// are pure, so they are tested from sample values without a web view.
+///
+/// An entry's time is `time` or `t`: the page writes `t`, and since
+/// PsyNeuView#176 repeats it as `time`; either is read, so a page of
+/// either age gets its times into `activity.txt`.
 enum PageDiagnostics {
 
     /// What the app runs in the page. `return await` so a page without the
@@ -29,6 +35,14 @@ enum PageDiagnostics {
     static let maxStateBytes = 1024 * 1024
     static let maxActivityLines = 10_000
 
+    /// One line of the page's timeline (PsyNeuView#177): when, what kind
+    /// of thing (action, event, error, message, wait, page), and the text.
+    struct TimelineEntry: Equatable {
+        var time: Date
+        var source: String
+        var text: String
+    }
+
     /// What the page gave, already in the report's shapes.
     struct Provided: Equatable {
         var version: Int
@@ -36,6 +50,12 @@ enum PageDiagnostics {
         var stateJSON: String
         /// One line per activity entry.
         var activityLines: [String]
+        /// The page's timeline, in its order (PsyNeuView#177); empty from an older page.
+        var timeline: [TimelineEntry] = []
+        /// The previous launch's saved activity, one line per entry; empty when there is none.
+        var previousActivityLines: [String] = []
+        /// Whether the page was logging user actions; nil from an older page.
+        var actionLogging: Bool? = nil
     }
 
     enum Outcome: Equatable {
@@ -77,10 +97,16 @@ enum PageDiagnostics {
         }
         let state = dict["state"] ?? NSNull()
         let activity = dict["activity"] as? [Any] ?? []
+        let timeline = dict["timeline"] as? [Any] ?? []
+        let previous = dict["previousActivity"] as? [Any] ?? []
+        let logging = dict["actionLogging"] as? Bool
         return .provided(Provided(
             version: version,
             stateJSON: stateJSON(state),
-            activityLines: activityLines(activity)))
+            activityLines: activityLines(activity),
+            timeline: timelineEntries(timeline),
+            previousActivityLines: previous.isEmpty ? [] : activityLines(previous),
+            actionLogging: logging))
     }
 
     /// Nothing came back within `timeout`.
@@ -115,7 +141,7 @@ enum PageDiagnostics {
     static func activityLines(_ activity: [Any]) -> [String] {
         var lines = activity.map { entry -> String in
             guard let e = entry as? [String: Any] else { return "? · ? · " + describe(entry) }
-            return [field(e, "time"), field(e, "kind"), field(e, "text")].joined(separator: " · ")
+            return [timeField(e), field(e, "kind"), field(e, "text")].joined(separator: " · ")
         }
         if lines.count > maxActivityLines {
             let dropped = lines.count - maxActivityLines
@@ -130,11 +156,52 @@ enum PageDiagnostics {
         return lines.map { ProblemReport.redact($0, home: home) }.joined(separator: "\n") + "\n"
     }
 
+    /// The page's timeline entries (PsyNeuView#177): `{t, source, text}`,
+    /// `t` an ISO time or the page's `Date.now()`. One without a readable
+    /// time is left out: it couldn't be placed.
+    static func timelineEntries(_ timeline: [Any]) -> [TimelineEntry] {
+        timeline.compactMap { entry in
+            guard let e = entry as? [String: Any], let time = date(e["t"] ?? e["time"]) else { return nil }
+            return TimelineEntry(
+                time: time,
+                source: field(e, "source"),
+                text: field(e, "text"))
+        }
+    }
+
+    /// `time`, or `t` when the page wrote only that.
+    private static func timeField(_ e: [String: Any]) -> String {
+        let v = e["time"].flatMap { $0 is NSNull ? nil : $0 } ?? e["t"]
+        guard let v, !(v is NSNull) else { return "?" }
+        if let n = v as? NSNumber, !(v is Bool) { return isoTime(n.doubleValue) }
+        return describe(v).replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// A time the page wrote, as a Date: ISO 8601 with or without fractions, or an epoch number.
+    static func date(_ v: Any?) -> Date? {
+        guard let v, !(v is NSNull) else { return nil }
+        if let n = v as? NSNumber, !(v is Bool) {
+            let x = n.doubleValue
+            return Date(timeIntervalSince1970: x > 32_503_680_000 ? x / 1000 : x)
+        }
+        guard let s = v as? String else { return nil }
+        return isoWithFractions.date(from: s) ?? isoWithoutFractions.date(from: s)
+    }
+
+    private static let isoWithFractions: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoWithoutFractions: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private static func field(_ e: [String: Any], _ key: String) -> String {
         guard let v = e[key], !(v is NSNull) else { return "?" }
-        if key == "time", let n = v as? NSNumber, !(v is Bool) {
-            return isoTime(n.doubleValue)
-        }
         return describe(v).replacingOccurrences(of: "\n", with: " ")
     }
 

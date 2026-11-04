@@ -27,7 +27,117 @@ final class PageDiagnosticsTests: XCTestCase {
         ] as [Any],
     ]
 
+    /// What a page built for PsyNeuView#177 answers: the same, with the
+    /// timeline, the previous launch's saved activity, and the setting.
+    static var fullAnswer: [String: Any] {
+        var a = answer
+        a["timeline"] = [
+            ["t": "2026-10-06T14:00:01.000Z", "source": "action", "text": "Open › Stroop"],
+            ["t": "2026-10-06T14:00:01.050Z", "source": "wait", "text": "start · POST /api/model/load · from: Open › Stroop"],
+            ["t": "2026-10-06T14:00:02.050Z", "source": "wait", "text": "stop · POST /api/model/load · 1.000 s · failed, HTTP 500"],
+            ["t": "2026-10-06T14:00:02.100Z", "source": "error", "text": "Error shown: Couldn't load /Users/someone/x · after: POST /api/model/load failed (HTTP 500) · likely from: Open › Stroop"],
+        ] as [Any]
+        a["previousActivity"] = [
+            ["t": "2026-10-06T13:00:01.000Z", "time": "2026-10-06T13:00:01.000Z", "kind": "menu", "text": "Open › Earlier"],
+            ["t": "2026-10-06T13:00:02.000Z", "time": "2026-10-06T13:00:02.000Z", "kind": "error", "text": "Model error: before the restart"],
+        ] as [Any]
+        a["actionLogging"] = false
+        return a
+    }
+
     // MARK: Reading the answer
+
+    /// The page's real shape (PsyNeuView#176): `t` and `time` the same ISO
+    /// time. An older page wrote only `t`, and every line of activity.txt
+    /// began with `?`; either is read now.
+    func testAnEntrysTimeIsTimeOrT() {
+        let lines = PageDiagnostics.activityLines([
+            ["t": "2026-11-03T16:00:17.058Z", "time": "2026-11-03T16:00:17.058Z", "kind": "menu", "text": "Open menu opened"] as [String: Any],
+            ["t": "2026-11-03T16:00:17.059Z", "kind": "wait", "text": "GET /api/psyneulink-examples · stopped 2026-11-03T16:00:17.088Z · 0.029 s · ok · from: Open menu opened",
+             "data": ["label": "GET /api/psyneulink-examples", "durationMs": 29] as [String: Any]] as [String: Any],
+            ["t": 1_791_295_262_000, "kind": "run", "text": "Run finished: 3 trials"] as [String: Any],
+            ["t": NSNull(), "time": "2026-11-03T16:00:18.000Z", "kind": "menu", "text": "null t, time given"] as [String: Any],
+        ] as [Any])
+        XCTAssertEqual(lines, [
+            "2026-11-03T16:00:17.058Z · menu · Open menu opened",
+            "2026-11-03T16:00:17.059Z · wait · GET /api/psyneulink-examples · stopped 2026-11-03T16:00:17.088Z · 0.029 s · ok · from: Open menu opened",
+            "2026-10-06T14:01:02.000Z · run · Run finished: 3 trials",
+            "2026-11-03T16:00:18.000Z · menu · null t, time given",
+        ])
+    }
+
+    /// The timeline, the previous launch's activity and the setting
+    /// (PsyNeuView#177) are read; an older page's answer has none, and
+    /// offers neither part.
+    func testTheTimelineAndThePreviousLaunchAreReadAndAttached() throws {
+        let older = try XCTUnwrap(PageDiagnostics.outcome(result: Self.answer, error: nil).provided)
+        XCTAssertEqual(older.timeline, [])
+        XCTAssertEqual(older.previousActivityLines, [])
+        XCTAssertNil(older.actionLogging)
+        var r = ReportSamples.request()
+        r.page = .provided(older)
+        XCTAssertFalse(ProblemReport.offered(r).contains(.timeline))
+        XCTAssertFalse(ProblemReport.offered(r).contains(.previousPageActivity))
+        XCTAssertNil(ReportSamples.build(r).timeline)
+
+        let provided = try XCTUnwrap(PageDiagnostics.outcome(result: Self.fullAnswer, error: nil).provided)
+        XCTAssertEqual(provided.timeline.count, 4)
+        XCTAssertEqual(provided.timeline[0], PageDiagnostics.TimelineEntry(
+            time: Date(timeIntervalSince1970: 1_791_295_201), source: "action", text: "Open › Stroop"))
+        XCTAssertEqual(provided.previousActivityLines, [
+            "2026-10-06T13:00:01.000Z · menu · Open › Earlier",
+            "2026-10-06T13:00:02.000Z · error · Model error: before the restart",
+        ])
+        XCTAssertEqual(provided.actionLogging, false)
+
+        r.page = .provided(provided)
+        r.logLines = ["[2026-10-06 14:00:01.500] [Backend] [perf] introspect: 0.4s"]
+        XCTAssertEqual(ProblemReport.offered(r), [.versions, .startup, .logs, .pageState, .pageActivity,
+                                                  .previousPageActivity, .timeline, .system])
+        let files = ReportSamples.build(r)
+        XCTAssertEqual(files.previousPageActivity, """
+        2026-10-06T13:00:01.000Z · menu · Open › Earlier
+        2026-10-06T13:00:02.000Z · error · Model error: before the restart
+
+        """)
+        let timeline = try XCTUnwrap(files.timeline)
+        XCTAssertTrue(timeline.contains("# Times are local to this Mac: ") && timeline.contains(" (UTC+00:00). Sources:"), timeline)
+        XCTAssertTrue(timeline.contains("""
+        2026-10-06 14:00:01.000  action   Open › Stroop
+        2026-10-06 14:00:01.050  wait     start · POST /api/model/load · from: Open › Stroop
+        2026-10-06 14:00:01.500  server   Backend · [perf] introspect: 0.4s
+        2026-10-06 14:00:02.050  wait     stop · POST /api/model/load · 1.000 s · failed, HTTP 500
+        2026-10-06 14:00:02.100  error    Error shown: Couldn't load ~/x · after: POST /api/model/load failed (HTTP 500) · likely from: Open › Stroop
+
+        """), timeline)
+        XCTAssertTrue(files.markdown.contains("- activity.txt: PsyNeuView's activity since launch, one line per entry: time · kind · text (action logging was off: what the user did isn't in it)"))
+        XCTAssertTrue(files.markdown.contains("- activity-previous-launch.txt: PsyNeuView's activity in the previous launch, from the copy it keeps on this Mac"))
+        XCTAssertTrue(files.markdown.contains("- timeline.txt: what the user did, what PsyNeuView did, errors, every wait's start and stop, and the server log, in time order"))
+        let json = ReportSamples.diagnostics(files)
+        XCTAssertEqual((json["page"] as? [String: Any])?["actionLogging"] as? Bool, false)
+        XCTAssertEqual(json["attachments"] as? [String], [
+            "report.md", "screenshot-1.png", "logs.txt", "page-state.json", "activity.txt",
+            "activity-previous-launch.txt", "timeline.txt", "diagnostics.json",
+        ])
+        // The View buttons show the same, newest lines first in the usual way.
+        XCTAssertTrue(ProblemReport.preview(.timeline, of: r, home: Self.home, timeZone: Self.utc).contains("action   Open › Stroop"))
+        XCTAssertTrue(ProblemReport.preview(.previousPageActivity, of: r, home: Self.home).contains("Open › Earlier"))
+        // Each can be left out on its own. A log the sender unticked goes
+        // nowhere in the report: the timeline then has no server lines.
+        r.included.remove(.logs)
+        r.included.remove(.previousPageActivity)
+        let fewer = ReportSamples.build(r)
+        XCTAssertNil(fewer.logs)
+        XCTAssertNil(fewer.previousPageActivity)
+        let fewerTimeline = try XCTUnwrap(fewer.timeline)
+        XCTAssertFalse(fewerTimeline.contains("introspect"), fewerTimeline)
+        XCTAssertFalse(fewerTimeline.contains("  server   "), fewerTimeline)
+        XCTAssertTrue(fewerTimeline.contains("# No server log lines: the sender left this launch's log out of the report."))
+        XCTAssertTrue(fewerTimeline.contains("action   Open › Stroop"))
+        XCTAssertTrue(fewer.markdown.contains("no server lines, since the log was left out"))
+        XCTAssertFalse(ProblemReport.preview(.timeline, of: r, home: Self.home, timeZone: Self.utc).contains("introspect"))
+        XCTAssertTrue(fewer.markdown.contains("Left out by the sender: This launch's whole log; PsyNeuView's activity in the previous launch."))
+    }
 
     func testAnAnswerBecomesStateJSONAndActivityLines() throws {
         let provided = try XCTUnwrap(PageDiagnostics.outcome(result: Self.answer, error: nil).provided)
@@ -173,7 +283,7 @@ final class PageDiagnosticsTests: XCTestCase {
         var r = ReportSamples.request()
         r.settings = SettingsSnapshotTests.values
         r.previousLogLines = ["earlier"]
-        r.page = PageDiagnostics.outcome(result: Self.answer, error: nil)
+        r.page = PageDiagnostics.outcome(result: Self.fullAnswer, error: nil)
         XCTAssertEqual(ProblemReport.offered(r), ProblemReport.Part.allCases)
         XCTAssertEqual(ProblemReport.Part.allCases.map(\.title), [
             "Versions, and where PsyNeuView runs from",
@@ -183,14 +293,17 @@ final class PageDiagnosticsTests: XCTestCase {
             "The previous launch's log (this launch is under 2 minutes old)",
             "PsyNeuView's state, as the page reported it",
             "PsyNeuView's activity since launch",
+            "PsyNeuView's activity in the previous launch",
+            "One timeline: what you did, errors, waits and the server log, in time order",
             "macOS version and Mac model",
         ])
         XCTAssertEqual(ProblemReport.Part.allCases.map(\.fileName),
-                       [nil, nil, nil, "logs.txt", "logs-previous-launch.txt", "page-state.json", "activity.txt", nil])
+                       [nil, nil, nil, "logs.txt", "logs-previous-launch.txt", "page-state.json", "activity.txt",
+                        "activity-previous-launch.txt", "timeline.txt", nil])
         let files = ReportSamples.build(r)
         XCTAssertEqual(files.attachments(screenshots: ["screenshot-1.png"]), [
             "report.md", "screenshot-1.png", "logs.txt", "logs-previous-launch.txt",
-            "page-state.json", "activity.txt", "diagnostics.json",
+            "page-state.json", "activity.txt", "activity-previous-launch.txt", "timeline.txt", "diagnostics.json",
         ])
         XCTAssertEqual(ReportSamples.diagnostics(files)["attachments"] as? [String],
                        files.attachments(screenshots: ["screenshot-1.png"]))
