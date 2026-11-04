@@ -89,7 +89,7 @@ The Mac app is a thin wrapper around PsyNeuView's React app
    open the same React Settings. The app has no settings UI of its own.
 2. **The app contributes only what React can't do** — native file dialogs,
    starting and stopping the server, installs and updates, launch at login —
-   through **bridges** (`pnvFile`, `pnvSettings`; see
+   through **bridges** (`pnvFile`, `pnvSettings`, `pnvOpenWindow`; see
    `Services/FileBridge.swift` and `Services/SettingsBridge.swift`, which
    document each one's JS contract) and **menu items that route into the React
    UI** (Settings… sends the page `pnv:open-settings`).
