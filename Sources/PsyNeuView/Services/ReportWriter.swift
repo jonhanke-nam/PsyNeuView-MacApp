@@ -4,7 +4,8 @@ import Foundation
 ///
 ///     <destination>/PNV-debugging-2026-10-06_14-03-22/
 ///         report.md  screenshot-1.png …  logs.txt  logs-previous-launch.txt
-///         page-state.json  activity.txt  diagnostics.json
+///         page-state.json  activity.txt  activity-previous-launch.txt
+///         timeline.txt  diagnostics.json
 ///     <destination>/PNV-debugging-2026-10-06_14-03-22.zip
 ///
 /// The destination is ~/Downloads in the app and a temporary folder in tests.
@@ -87,6 +88,12 @@ enum ReportWriter {
         if let state = files.pageState { try write(Data(state.utf8), ProblemReport.Part.pageState.fileName!) }
         if let activity = files.pageActivity {
             try write(Data(activity.utf8), ProblemReport.Part.pageActivity.fileName!)
+        }
+        if let previous = files.previousPageActivity {
+            try write(Data(previous.utf8), ProblemReport.Part.previousPageActivity.fileName!)
+        }
+        if let timeline = files.timeline {
+            try write(Data(timeline.utf8), ProblemReport.Part.timeline.fileName!)
         }
         try write(files.diagnostics, "diagnostics.json")
 

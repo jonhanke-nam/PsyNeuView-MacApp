@@ -48,9 +48,16 @@ final class ReportWriterTests: XCTestCase {
         full.previousLogs = "earlier\n"
         full.pageState = "{\n  \"a\" : 1\n}\n"
         full.pageActivity = "t · kind · text\n"
+        full.previousPageActivity = "t · kind · earlier text\n"
+        full.timeline = "# PsyNeuView timeline\n2026-10-06 14:00:01.000  action   Open › Stroop\n"
         let saved = try ReportWriter.save(reference: "R", files: full, screenshots: [], into: destination, zip: false)
         XCTAssertEqual(saved.files.map(\.lastPathComponent),
-                       ["report.md", "logs.txt", "logs-previous-launch.txt", "page-state.json", "activity.txt", "diagnostics.json"])
+                       ["report.md", "logs.txt", "logs-previous-launch.txt", "page-state.json", "activity.txt",
+                        "activity-previous-launch.txt", "timeline.txt", "diagnostics.json"])
+        XCTAssertEqual(try String(contentsOf: saved.folder.appendingPathComponent("timeline.txt"), encoding: .utf8),
+                       full.timeline)
+        XCTAssertEqual(try String(contentsOf: saved.folder.appendingPathComponent("activity-previous-launch.txt"), encoding: .utf8),
+                       "t · kind · earlier text\n")
         XCTAssertEqual(saved.files.map(\.lastPathComponent), full.attachments(screenshots: []),
                        "the folder holds exactly what the report lists")
         XCTAssertEqual(try String(contentsOf: saved.folder.appendingPathComponent("activity.txt"), encoding: .utf8),
