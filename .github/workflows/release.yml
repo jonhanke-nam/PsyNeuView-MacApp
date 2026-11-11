@@ -218,6 +218,15 @@ jobs:
           BOOT_TIMEOUT: "900"
         run: ./scripts/check-bundle-upgrade.sh 0.25
 
+      # An install cut short has to be finished, not started from (#51).
+      # Quitting during an update's install left an environment with no
+      # server packages, and the next launch spun on "Starting the server"
+      # for twenty minutes. This leaves that state behind and relaunches.
+      - name: An interrupted install is finished on the next launch
+        env:
+          BOOT_TIMEOUT: "900"
+        run: ./scripts/check-interrupted-install.sh 0.25
+
       # And a user's edits have to survive that move. Until PsyNeuView-archive#1319 a
       # working copy of a Reference Model lived in the install's own backend/,
       # so an update reopened the pristine model. This plants an edit under the
