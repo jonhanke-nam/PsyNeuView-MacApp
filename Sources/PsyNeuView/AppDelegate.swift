@@ -1361,8 +1361,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         showStartingWindow(status: "Finishing setup — installing Python packages. "
                                  + "This takes a few minutes.")
+        // A venv that exists but never finished setup is completed, not
+        // rebuilt: what it already holds is reused (#51).
+        let venv = repoPath.appendingPathComponent("backend/.venv")
+        let state = FileManager.default.fileExists(atPath: venv.path)
+            ? "unfinished (an earlier install was interrupted) — finishing it"
+            : "missing — rebuilding it"
         logCollector.add(
-            "Python environment missing at \(repoPath.path)/backend/.venv — rebuilding it.",
+            "Python environment at \(venv.path) is \(state).",
             source: .system)
 
         let installer = Installer()

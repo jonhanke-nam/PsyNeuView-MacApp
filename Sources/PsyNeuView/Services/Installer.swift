@@ -360,6 +360,14 @@ final class Installer {
             return false
         }
         packagesWritten = false
+        // Until the last package is in, this environment must not read as
+        // ready, whatever stops the install: a failure, a crash or a quit (#51).
+        let venvForMarker = repoPath.appendingPathComponent("backend/.venv")
+        guard BundledPsyNeuView.markSetup(.installing, venv: venvForMarker) else {
+            stepStatuses[.installPythonDeps] = .failed(
+                "Couldn't write to the virtual environment at \(venvForMarker.path)")
+            return false
+        }
 
         var env = Shell.userEnvironment()
         let venvDir = repoPath.appendingPathComponent("backend/.venv")
@@ -446,6 +454,11 @@ final class Installer {
             }
         }
 
+        guard BundledPsyNeuView.markSetup(.complete, venv: venvForMarker) else {
+            stepStatuses[.installPythonDeps] = .failed(
+                "Couldn't mark the virtual environment at \(venvForMarker.path) as finished")
+            return false
+        }
         appendOutput("  ✓ Python dependencies installed\n")
         return true
     }

@@ -178,11 +178,57 @@ enum BundledPsyNeuView {
     /// the environment is missing, which is exactly what a 0.5.2 user hit — the
     /// app found the tree, found no venv, logged "run the Setup Wizard" and
     /// stopped. (#106)
+    ///
+    /// `bin/python` and `bin/pip` alone prove nothing: `python -m venv` writes
+    /// both before a single package is installed. Quitting during an update's
+    /// install left exactly that, and the next launch started a server with no
+    /// uvicorn and spun for twenty minutes. Setup now marks the environment
+    /// complete as its last step (#51).
     static func hasUsableEnvironment(at directory: URL) -> Bool {
         let fm = FileManager.default
         let venv = directory.appendingPathComponent("backend/.venv")
-        return fm.isExecutableFile(atPath: venv.appendingPathComponent("bin/python").path)
-            && fm.isExecutableFile(atPath: venv.appendingPathComponent("bin/pip").path)
+        guard fm.isExecutableFile(atPath: venv.appendingPathComponent("bin/python").path),
+              fm.isExecutableFile(atPath: venv.appendingPathComponent("bin/pip").path)
+        else { return false }
+        switch setupState(ofVenv: venv) {
+        case .complete: return true
+        case .installing: return false
+        case nil:
+            // Built before the marker existed. Don't make every user reinstall:
+            // accept it if the server and PsyNeuLink are both there.
+            return requiredPackages.allSatisfy {
+                VersionReport.installedVersion(of: $0, inVenv: venv) != nil
+            }
+        }
+    }
+
+    /// What an environment without a setup marker must contain to be used.
+    static let requiredPackages = ["uvicorn", "fastapi", "psyneulink"]
+
+    /// How far setup got in an environment (#51).
+    enum SetupState: String {
+        case installing, complete
+    }
+
+    /// The file inside `backend/.venv` that records `SetupState`.
+    static let setupMarkerName = ".psyneuview-setup"
+
+    /// The recorded setup state, or nil for an environment built before the
+    /// marker existed.
+    static func setupState(ofVenv venv: URL) -> SetupState? {
+        let marker = venv.appendingPathComponent(setupMarkerName)
+        guard let text = try? String(contentsOf: marker, encoding: .utf8) else { return nil }
+        // Anything unreadable counts as unfinished, never as complete.
+        return SetupState(rawValue: text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .installing
+    }
+
+    /// Record how far setup got. Written `installing` before packages go in and
+    /// `complete` only after the last one succeeds, so an interrupted install
+    /// is never mistaken for a finished one.
+    @discardableResult
+    static func markSetup(_ state: SetupState, venv: URL) -> Bool {
+        let marker = venv.appendingPathComponent(setupMarkerName)
+        return (try? (state.rawValue + "\n").write(to: marker, atomically: true, encoding: .utf8)) != nil
     }
 
     /// Whether the app can start from this directory, whichever shape it is.
