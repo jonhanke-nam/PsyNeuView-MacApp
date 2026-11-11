@@ -131,6 +131,28 @@ enum PsyNeuLinkInstall {
             timelineID: id)
     }
 
+    /// The arguments for `uv sync` from `backend/uv.lock` (PsyNeuView#247):
+    /// every package at the version the release's CI tested, except
+    /// PsyNeuLink, which is the user's choice and goes in afterwards.
+    ///
+    /// - `--frozen`: install the lock as written; never re-resolve.
+    /// - `--no-install-package psyneulink`: the lock pins the commit CI
+    ///   tests; installing it only to replace it with the chosen source would
+    ///   fetch and build PsyNeuLink twice. Its dependencies still come from
+    ///   the lock.
+    /// - `--inexact`: leave anything else in the environment alone, such as
+    ///   a package a model needed that the user added.
+    /// - `--no-python-downloads`: the environment already has the bundled
+    ///   Python; never fetch another.
+    static func lockSyncArguments() -> [String] {
+        ["sync", "--frozen", "--no-install-package", "psyneulink", "--inexact",
+         "--link-mode=\(linkMode)", "--no-python-downloads"]
+    }
+
+    /// The lock file that makes setup install from the lock, inside a tree's
+    /// `backend/`. PsyNeuViews before #247 have none, and install as before.
+    static let lockFileName = "uv.lock"
+
     /// What to do after a run ended.
     enum Outcome: Equatable, Sendable {
         case installed

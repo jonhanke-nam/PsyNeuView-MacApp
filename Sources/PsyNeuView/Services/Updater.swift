@@ -429,7 +429,9 @@ final class Updater {
         if let uvPath {
             attempts.append(.init(
                 tool: .uv, executable: uvPath,
-                arguments: ["pip", "install", "--link-mode=\(PsyNeuLinkInstall.linkMode)", "-e", "."]
+                // --no-sources: as in setup, a source pinned in
+                // pyproject.toml must not replace the user's PsyNeuLink.
+                arguments: ["pip", "install", "--link-mode=\(PsyNeuLinkInstall.linkMode)", "--no-sources", "-e", "."]
                     + extraArguments))
         }
         if pipExists {

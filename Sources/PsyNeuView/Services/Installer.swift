@@ -385,6 +385,26 @@ final class Installer {
         // than no install. (#94)
         let installer = Shell.bundledUvPath()
 
+        // From the lock when the tree has one (PsyNeuView#247): the backend's
+        // packages at exactly the versions the release's CI tested, then the
+        // chosen PsyNeuLink on top. Without a lock (PsyNeuView before 0.6.14),
+        // or if the sync fails, the route below, as before.
+        let lock = backendDir.appendingPathComponent(PsyNeuLinkInstall.lockFileName)
+        if let uv = installer, FileManager.default.fileExists(atPath: lock.path) {
+            if await installFromLock(
+                uvPath: uv, pnlPipArgs: pnlPipArgs, venvPip: venvPip,
+                venvDir: venvDir, backendDir: backendDir, environment: env) {
+                guard BundledPsyNeuView.markSetup(.complete, venv: venvForMarker) else {
+                    stepStatuses[.installPythonDeps] = .failed(
+                        "Couldn't mark the virtual environment at \(venvForMarker.path) as finished")
+                    return false
+                }
+                appendOutput("  ✓ Python dependencies installed from the lock\n")
+                return true
+            }
+            appendOutput("Installing from the lock didn't work — installing without it.\n")
+        }
+
         // Order matters here. `backend/pyproject.toml` depends on a bare
         // `psyneulink`, so installing it first pulls the PyPI wheel — which the
         // phase-2 override then throws away, because the default source is the
@@ -463,6 +483,48 @@ final class Installer {
         return true
     }
 
+    /// Sync the backend's packages from `backend/uv.lock`, then install the
+    /// chosen PsyNeuLink over them (PsyNeuView#247). False if either failed;
+    /// the caller then installs the way it did before the lock.
+    private func installFromLock(
+        uvPath: String,
+        pnlPipArgs: [String],
+        venvPip: URL,
+        venvDir: URL,
+        backendDir: URL,
+        environment: [String: String]
+    ) async -> Bool {
+        var env = environment
+        // The project's environment is the venv setup just made, not a new
+        // `.venv` of uv's own choosing.
+        env["UV_PROJECT_ENVIRONMENT"] = venvDir.path
+        appendOutput("Installing Python packages from the lock with the bundled uv...\n")
+        beginTimeline(label: "Backend packages from the lock with uv", id: "backend")
+        let syncExit = await Shell.runStreaming(
+            uvPath,
+            arguments: PsyNeuLinkInstall.lockSyncArguments(),
+            currentDirectory: backendDir,
+            environment: env,
+            onOutput: streamToLog()
+        )
+        endTimeline()
+        guard syncExit == 0 else {
+            appendOutput("uv sync exited with code \(syncExit).\n")
+            return false
+        }
+        // PsyNeuLink isn't installed yet, so this is its first install: its
+        // dependencies are already there at the lock's versions, and anything
+        // a newer source needs beyond them is added.
+        let outcome = await installPsyNeuLink(
+            pnlPipArgs: pnlPipArgs, position: .first,
+            uvPath: uvPath, venvPip: venvPip, backendDir: backendDir, environment: env)
+        if case .failed(let reason) = outcome {
+            appendOutput("Installing PsyNeuLink from the chosen source failed (\(reason)).\n")
+            return false
+        }
+        return true
+    }
+
     /// Install PsyNeuLink with uv, then with pip if uv couldn't (#224).
     /// Each run is timed on its own; the log says when pip takes over, and why.
     private func installPsyNeuLink(
@@ -524,8 +586,11 @@ final class Installer {
         environment: [String: String]
     ) async -> Int32 {
         let executable = uvPath ?? venvPip.path
+        // --no-sources: a PsyNeuLink source pinned in pyproject.toml
+        // (`[tool.uv.sources]`) would replace the one the user chose, which
+        // went in first (PsyNeuView#247). pip ignores that table anyway.
         let arguments = uvPath != nil
-            ? ["pip", "install", "-e", "."]
+            ? ["pip", "install", "--no-sources", "-e", "."]
             : ["install", "-e", "."]
         beginTimeline(
             label: uvPath != nil ? "Backend packages with uv" : "Backend packages with pip",

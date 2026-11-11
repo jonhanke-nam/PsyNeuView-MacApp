@@ -12,7 +12,7 @@ final class UpdaterBackendInstallTests: XCTestCase {
         XCTAssertEqual(attempts.map(\.tool), [.uv, .pip])
         XCTAssertEqual(attempts[0].executable, "/b/uv")
         XCTAssertEqual(attempts[0].arguments,
-                       ["pip", "install", "--link-mode=\(PsyNeuLinkInstall.linkMode)", "-e", "."])
+                       ["pip", "install", "--link-mode=\(PsyNeuLinkInstall.linkMode)", "--no-sources", "-e", "."])
         XCTAssertEqual(attempts[1].arguments, ["install", "-e", "."])
     }
 
