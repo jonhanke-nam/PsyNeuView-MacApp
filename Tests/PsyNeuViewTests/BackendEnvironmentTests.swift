@@ -96,4 +96,37 @@ final class BackendEnvironmentTests: XCTestCase {
     func testAsksPythonNotToBufferItsOutput() {
         XCTAssertEqual(env()["PYTHONUNBUFFERED"], "1")
     }
+
+    // MARK: - uv for the backend's own installs (#53)
+
+    /// Settings switches PsyNeuLink through the backend, which only had pip
+    /// until it was told where the app's uv is (PsyNeuView#244).
+    func testTheBundledUvIsHandedToTheBackend() {
+        let env = ProcessManager.backendEnvironment(
+            base: [:], repoPath: repo,
+            uvPath: "/Applications/PsyNeuView.app/Contents/Resources/uv-0.9.11/uv")
+        XCTAssertEqual(env["PSYNEUVIEW_UV"], "/Applications/PsyNeuView.app/Contents/Resources/uv-0.9.11/uv")
+    }
+
+    /// No bundled uv (a developer build): the backend decides for itself.
+    func testNoBundledUvSetsNothing() {
+        XCTAssertNil(env()["PSYNEUVIEW_UV"])
+    }
+
+    /// The same cache as setup, so a switch reuses what setup downloaded.
+    func testTheBackendSharesSetupsUvCache() {
+        let support = URL(fileURLWithPath: "/tmp/pnv-support")
+        let env = ProcessManager.backendEnvironment(
+            base: [:], repoPath: repo, uvPath: "/x/uv", supportDirectory: support)
+        XCTAssertEqual(env["UV_CACHE_DIR"],
+                       PsyNeuLinkInstall.cacheDirectory(supportDirectory: support).path)
+    }
+
+    /// A cache already chosen (the release checks measure a cold one) wins.
+    func testAnExistingUvCacheIsKept() {
+        let env = ProcessManager.backendEnvironment(
+            base: ["UV_CACHE_DIR": "/tmp/cold"], repoPath: repo,
+            uvPath: "/x/uv", supportDirectory: URL(fileURLWithPath: "/tmp/pnv-support"))
+        XCTAssertEqual(env["UV_CACHE_DIR"], "/tmp/cold")
+    }
 }

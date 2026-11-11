@@ -93,7 +93,9 @@ final class ProcessManager {
     nonisolated static func backendEnvironment(
         base: [String: String],
         repoPath: URL,
-        identity: AppIdentity = .current
+        identity: AppIdentity = .current,
+        uvPath: String? = nil,
+        supportDirectory: URL? = nil
     ) -> [String: String] {
         var env = base
 
@@ -157,6 +159,18 @@ final class ProcessManager {
         // stdout when it is a pipe, which would hand the app the whole start
         // in one lump at exit; unbuffered, each line arrives as it is printed.
         env["PYTHONUNBUFFERED"] = "1"
+
+        // The uv this app installs with, and its cache (#53). The backend
+        // switches and refreshes PsyNeuLink itself (Settings), and without
+        // these it only had pip: about five times slower, and the steps said
+        // "pip" (PsyNeuView#244). With the same cache, a switch reuses every
+        // wheel setup already fetched.
+        if let uvPath {
+            env["PSYNEUVIEW_UV"] = uvPath
+        }
+        if let supportDirectory {
+            env = PsyNeuLinkInstall.environment(base: env, supportDirectory: supportDirectory)
+        }
 
         // The PsyNeuLink source is deliberately *not* published here any more
         // (#132, was #10).
@@ -252,7 +266,9 @@ final class ProcessManager {
         let env = Self.backendEnvironment(
             base: Shell.userEnvironment(),
             repoPath: repoPath,
-            identity: .current
+            identity: .current,
+            uvPath: Shell.bundledUvPath(),
+            supportDirectory: BundledPsyNeuView.supportDirectory()
         )
 
         let logCollector = self.logCollector
