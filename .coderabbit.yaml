@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews every PR to jonhanke-devel with the rules below
+# (jonhanke-nam/PsyNeuView#246). When a finding recurs, it becomes a check in
+# the standing code scan (jonhanke-nam/PsyNeuView#243), and the reverse.
+language: en-US
+tone_instructions: "Plain English, short sentences, no jargon abbreviations. Say what breaks, for whom, and the fix."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - jonhanke-devel
+
+  path_filters:
+    - "!**/*.png"
+    - "!**/*.icns"
+    - "!Package.resolved"
+    - "!Resources/python-*/**"
+    - "!Resources/uv-*/**"
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        House rules for every file:
+        - No other people's names or initials anywhere: code, comments, docs, tests, assets. Use roles ("the PsyNeuLink lead", "a tester"). The repo owner's own name is fine.
+        - Anything a person reads (windows, alerts, log lines shown in the Logs window, docs) is plain English: no dev abbreviations, no unexplained jargon.
+        - A bug fix comes with a regression test (XCTest, or a release-CI script for launch behaviour). Flag a fix without one.
+
+    - path: "Sources/**/*.swift"
+      instructions: |
+        - The app is a thin wrapper around the PsyNeuView page. UI belongs in the page (React); native code only bridges and routes menus. There are four native windows (setup wizard, starting, logs, About); flag any new one.
+        - Settings live in the page's one Settings surface; Mac-only settings arrive through the settings bridge, never a native settings window or a second control.
+        - Package installs use the bundled uv first, then the environment's pip as a fallback that logs why. Flag a direct pip call that isn't that fallback, and any message that says "pip" when uv ran.
+        - Anything shown or logged redacts tokens and shows the home folder as `~`; diagnostics stay within PsyNeuView, PsyNeuLink, settings and the system, with no other user files and no personal data.
+        - Moving the user's folders is a visible, reversible Move… action, never silent.
+        - Long-running steps report progress; a process that exits must never leave a window waiting (#51).
+        - Tests must run on CI's toolchain: XCTest, not swift-testing.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Never weaken a required check. Long steps carry a timeout. Release checks run against a real launch, not constants.
+
+chat:
+  auto_reply: true
