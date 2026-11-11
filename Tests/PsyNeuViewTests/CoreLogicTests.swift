@@ -1217,6 +1217,23 @@ final class EnvironmentHealthTests: XCTestCase {
         return root
     }
 
+    /// A venv as `python -m venv` leaves it, plus whatever packages and setup
+    /// marker the case needs (#51).
+    private func makeTree(packages: [String],
+                          marker: BundledPsyNeuView.SetupState?) throws -> URL {
+        let root = try makeTree(withVenv: true)
+        let venv = root.appendingPathComponent("backend/.venv")
+        let site = venv.appendingPathComponent("lib/python3.14/site-packages")
+        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
+        for package in packages {
+            try FileManager.default.createDirectory(
+                at: site.appendingPathComponent("\(package)-1.0.dist-info"),
+                withIntermediateDirectories: true)
+        }
+        if let marker { BundledPsyNeuView.markSetup(marker, venv: venv) }
+        return root
+    }
+
     /// The exact shape reported: source present, environment absent.
     func testIntactTreeWithNoEnvironmentIsRunnableButNotReady() throws {
         let tree = try makeTree(withVenv: false)
@@ -1228,16 +1245,65 @@ final class EnvironmentHealthTests: XCTestCase {
     }
 
     func testCompleteEnvironmentIsReady() throws {
-        let tree = try makeTree(withVenv: true)
+        let tree = try makeTree(packages: ["psyneulink", "fastapi", "uvicorn"], marker: .complete)
         defer { try? FileManager.default.removeItem(at: tree) }
         XCTAssertTrue(BundledPsyNeuView.hasUsableEnvironment(at: tree))
     }
 
-    /// A half-built venv — an install interrupted partway — must not read as
-    /// ready, or the app starts against an environment that cannot run.
-    func testHalfBuiltEnvironmentIsNotReady() throws {
+    /// A venv missing its pip is broken, whatever else it holds.
+    func testEnvironmentWithoutPipIsNotReady() throws {
         let tree = try makeTree(withVenv: false, pipOnly: true)
         defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// What quitting during an update's install really leaves (#51): python
+    /// and pip, PsyNeuLink, but not the server. It used to read as ready, and
+    /// the next launch spun on "Starting the server" with no uvicorn.
+    func testInterruptedInstallIsNotReady() throws {
+        let tree = try makeTree(packages: ["psyneulink"], marker: .installing)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// The marker decides, even when every package happens to be present: an
+    /// install can be stopped after the last package lands but before it ends.
+    func testInstallingMarkerIsNotReadyEvenWithPackages() throws {
+        let tree = try makeTree(packages: ["psyneulink", "fastapi", "uvicorn"], marker: .installing)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// The bare venv `python -m venv` writes before any install starts.
+    func testFreshVenvWithNoPackagesIsNotReady() throws {
+        let tree = try makeTree(packages: [], marker: nil)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// Built before the marker existed: accepted when it holds the server and
+    /// PsyNeuLink, so updating the app doesn't force every user to reinstall.
+    func testUnmarkedCompleteEnvironmentIsReady() throws {
+        let tree = try makeTree(packages: ["psyneulink", "fastapi", "uvicorn"], marker: nil)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertTrue(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// Built before the marker existed and cut short: the reported case.
+    func testUnmarkedEnvironmentWithoutServerIsNotReady() throws {
+        let tree = try makeTree(packages: ["psyneulink"], marker: nil)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
+    }
+
+    /// A damaged marker never reads as complete.
+    func testUnreadableMarkerCountsAsUnfinished() throws {
+        let tree = try makeTree(packages: ["psyneulink", "fastapi", "uvicorn"], marker: nil)
+        defer { try? FileManager.default.removeItem(at: tree) }
+        let venv = tree.appendingPathComponent("backend/.venv")
+        try "garbage".write(to: venv.appendingPathComponent(BundledPsyNeuView.setupMarkerName),
+                            atomically: true, encoding: .utf8)
+        XCTAssertEqual(BundledPsyNeuView.setupState(ofVenv: venv), .installing)
         XCTAssertFalse(BundledPsyNeuView.hasUsableEnvironment(at: tree))
     }
 

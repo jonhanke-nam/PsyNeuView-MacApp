@@ -32,6 +32,8 @@ enum StartupDecision {
         var ceiling: TimeInterval
         /// When to start reassuring, from Constants.
         var reassureAfter: TimeInterval
+        /// The server's last error line, if it has exited (#51).
+        var exitDetail: String? = nil
     }
 
     /// What the user should be looking at.
@@ -77,9 +79,7 @@ enum StartupDecision {
             // Retrying cannot help: the process is not coming back on its own,
             // and offering the button again is what made #101 log "Cannot
             // start" four times.
-            return .failed(
-                reason: "The PsyNeuView server stopped before it finished starting.",
-                retryable: false)
+            return .failed(reason: stoppedReason(detail: input.exitDetail), retryable: false)
         }
 
         if input.elapsed > input.ceiling {
@@ -91,5 +91,21 @@ enum StartupDecision {
 
         return .starting(
             message: input.elapsed > input.reassureAfter ? slowMessage : startingMessage)
+    }
+
+    /// Why a start failed when the server exited, with its own last word on it.
+    ///
+    /// "Stopped" alone sends the user to the log for the one line that matters;
+    /// #51's was "No module named uvicorn", under a spinner for twenty minutes.
+    static func stoppedReason(detail: String?) -> String {
+        let base = "The PsyNeuView server stopped before it finished starting."
+        guard let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !detail.isEmpty else { return base }
+        let shown = detail.count > 200 ? String(detail.prefix(200)) + "…" : detail
+        if detail.contains("No module named") {
+            return base + " Its Python environment is incomplete (\(shown)). "
+                + "Quit PsyNeuView and open it again to finish setting it up."
+        }
+        return base + " It said: \(shown)"
     }
 }

@@ -15,11 +15,12 @@ final class StartupDecisionTests: XCTestCase {
         backendRunning: Bool = true,
         elapsed: TimeInterval = 1,
         ceiling: TimeInterval = 600,
-        reassureAfter: TimeInterval = 20
+        reassureAfter: TimeInterval = 20,
+        exitDetail: String? = nil
     ) -> StartupDecision.Input {
         .init(setupCompleted: setupCompleted, backendHealthy: backendHealthy,
               backendRunning: backendRunning, elapsed: elapsed,
-              ceiling: ceiling, reassureAfter: reassureAfter)
+              ceiling: ceiling, reassureAfter: reassureAfter, exitDetail: exitDetail)
     }
 
     // MARK: - The three that shipped
@@ -111,5 +112,38 @@ final class StartupDecisionTests: XCTestCase {
         let screen = StartupDecision.screen(for: input(elapsed: 601, ceiling: 600))
         guard case .failed(let reason, _) = screen else { return XCTFail("expected failure") }
         XCTAssertTrue(reason.contains("10"), "expected the wait in the message: \(reason)")
+    }
+
+    /// #51: the server died at once with "No module named uvicorn" and the
+    /// window said "Starting the server · usually under a second" for 22
+    /// minutes. A dead server must fail now, and say what it said.
+    func testADeadServerSaysWhatKilledIt() {
+        let screen = StartupDecision.screen(for: input(
+            backendRunning: false, elapsed: 0.3,
+            exitDetail: "/x/.venv/bin/python: No module named uvicorn"))
+        guard case .failed(let reason, let retryable) = screen else {
+            return XCTFail("a dead server is a failure, not a slow start")
+        }
+        XCTAssertFalse(retryable)
+        XCTAssertTrue(reason.contains("No module named uvicorn"), reason)
+        XCTAssertTrue(reason.contains("incomplete"), reason)
+    }
+
+    func testAnyOtherLastWordIsQuoted() {
+        let reason = StartupDecision.stoppedReason(detail: "OSError: [Errno 48] Address already in use")
+        XCTAssertTrue(reason.hasSuffix("It said: OSError: [Errno 48] Address already in use"), reason)
+    }
+
+    func testNoLastWordKeepsThePlainMessage() {
+        XCTAssertEqual(StartupDecision.stoppedReason(detail: nil),
+                       "The PsyNeuView server stopped before it finished starting.")
+        XCTAssertEqual(StartupDecision.stoppedReason(detail: "  \n"),
+                       "The PsyNeuView server stopped before it finished starting.")
+    }
+
+    func testALongLastWordIsCut() {
+        let reason = StartupDecision.stoppedReason(detail: String(repeating: "x", count: 500))
+        XCTAssertLessThan(reason.count, 300)
+        XCTAssertTrue(reason.hasSuffix("…"))
     }
 }

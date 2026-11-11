@@ -232,7 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     backendRunning: self.processManager.isBackendRunning)
         }
         processManager.onServiceWaiting = { [weak self] elapsed in
-            self?.applyStartupScreen(elapsed: elapsed, backendRunning: true)
+            // Asked, not assumed: this used to pass `true`, so a server that
+            // had already exited still read as starting (#51).
+            guard let self else { return }
+            self.applyStartupScreen(elapsed: elapsed,
+                                    backendRunning: self.processManager.isBackendRunning)
         }
 
         // Set up the application menu bar
@@ -1307,7 +1311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             backendRunning: backendRunning,
             elapsed: elapsed,
             ceiling: Constants.healthTimeout,
-            reassureAfter: Constants.healthSlowAfter))
+            reassureAfter: Constants.healthSlowAfter,
+            exitDetail: processManager.lastBackendError))
 
         switch screen {
         case .app, .setupWizard:
@@ -1361,8 +1366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         showStartingWindow(status: "Finishing setup — installing Python packages. "
                                  + "This takes a few minutes.")
+        // A venv that exists but never finished setup is completed, not
+        // rebuilt: what it already holds is reused (#51).
+        let venv = repoPath.appendingPathComponent("backend/.venv")
+        let state = FileManager.default.fileExists(atPath: venv.path)
+            ? "unfinished (an earlier install was interrupted) — finishing it"
+            : "missing — rebuilding it"
         logCollector.add(
-            "Python environment missing at \(repoPath.path)/backend/.venv — rebuilding it.",
+            "Python environment at \(venv.path) is \(state).",
             source: .system)
 
         let installer = Installer()

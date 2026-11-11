@@ -24,6 +24,10 @@ final class ProcessManager {
     /// When the current start attempt began, for the boot measurement (#104).
     private var startAttemptBegan: Date?
 
+    /// The backend's last error output, kept for when it exits before it is
+    /// ready: the Starting window shows it (#51).
+    private(set) var lastBackendError: String?
+
     var onServiceFailed: ((String) -> Void)?
     /// Called while the backend is still starting and taking a while, so the UI
     /// can show progress instead of appearing to hang. (#101)
@@ -211,6 +215,7 @@ final class ProcessManager {
 
     private func startBackend(repoPath: URL) throws {
         appState.backendStatus = .starting
+        lastBackendError = nil
 
         let venvPython = repoPath
             .appendingPathComponent("backend/.venv/bin/python")
@@ -270,17 +275,36 @@ final class ProcessManager {
                     self?.readStartPhases(from: text, at: now)
                 }
             },
-            onStderr: { text in
+            onStderr: { [weak self] text in
                 let trimmed = text.trimmingCharacters(in: .newlines)
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     logCollector.add(trimmed, source: .backend)
+                    if let last = trimmed.split(separator: "\n").last(where: {
+                        !$0.trimmingCharacters(in: .whitespaces).isEmpty
+                    }) {
+                        self?.lastBackendError = String(last)
+                    }
                 }
             },
             onTermination: { [weak self] exitCode in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.backendProcess = nil
-                    if self.appState.backendStatus != .stopping {
+                    if self.appState.backendStatus == .starting {
+                        // Exited before it ever answered: nothing will answer
+                        // now, so stop waiting and say so, rather than spin
+                        // until the ceiling — or forever, since the time-out
+                        // only fires while still "starting" (#51). No auto-
+                        // restart: a server that can't start fails the same way.
+                        self.logCollector.add(
+                            "Server exited before it was ready (code \(exitCode))",
+                            source: .system, isError: true
+                        )
+                        self.healthChecker.stopPolling()
+                        self.appState.backendStatus = .error
+                        self.reportBoot(healthy: false)
+                        self.onServiceFailed?(StartupDecision.stoppedReason(detail: self.lastBackendError))
+                    } else if self.appState.backendStatus != .stopping {
                         self.logCollector.add(
                             "Server exited unexpectedly (code \(exitCode))",
                             source: .system, isError: true
