@@ -411,27 +411,78 @@ final class Updater {
         )
     }
 
+    /// One attempt at installing the backend: which tool, run how.
+    struct BackendInstallAttempt: Equatable, Sendable {
+        var tool: PsyNeuLinkInstall.Tool
+        var executable: String
+        var arguments: [String]
+    }
+
+    /// The attempts at `install -e .` in `backend/`, in order: the bundled uv
+    /// first, then the environment's pip (#53). A checkout's refresh used pip
+    /// alone while setup used uv, so a pull that moved a dependency was the
+    /// slow path again. uv targets the environment through `VIRTUAL_ENV`.
+    nonisolated static func backendInstallAttempts(
+        uvPath: String?, venvPip: String, pipExists: Bool, extraArguments: [String]
+    ) -> [BackendInstallAttempt] {
+        var attempts: [BackendInstallAttempt] = []
+        if let uvPath {
+            attempts.append(.init(
+                tool: .uv, executable: uvPath,
+                arguments: ["pip", "install", "--link-mode=\(PsyNeuLinkInstall.linkMode)", "-e", "."]
+                    + extraArguments))
+        }
+        if pipExists {
+            attempts.append(.init(
+                tool: .pip, executable: venvPip,
+                arguments: ["install", "-e", "."] + extraArguments))
+        }
+        return attempts
+    }
+
+    /// Install the backend from `backend/` with uv, then pip if uv failed.
+    /// Returns the last exit code; -1 when there was nothing to run.
+    private func installBackend(repoPath: URL, extraArguments: [String], quiet: Bool) async -> Int32 {
+        let venvDir = repoPath.appendingPathComponent("backend/.venv")
+        let venvPip = venvDir.appendingPathComponent("bin/pip").path
+        var env = Shell.userEnvironment()
+        env["VIRTUAL_ENV"] = venvDir.path
+        env["PATH"] = venvDir.appendingPathComponent("bin").path + ":" + (env["PATH"] ?? "")
+        env = PsyNeuLinkInstall.environment(base: env, supportDirectory: BundledPsyNeuView.supportDirectory())
+
+        let output: @Sendable (String) -> Void
+        if quiet {
+            output = { _ in }
+        } else {
+            output = streamToLog()
+        }
+        var exitCode: Int32 = -1
+        for attempt in Self.backendInstallAttempts(
+            uvPath: Shell.bundledUvPath(), venvPip: venvPip,
+            pipExists: FileManager.default.fileExists(atPath: venvPip),
+            extraArguments: extraArguments) {
+            if exitCode > 0 {
+                log("uv exited with code \(exitCode) — retrying with pip.")
+            }
+            if !quiet { log("Installing the backend's packages with \(attempt.tool.name)...") }
+            exitCode = await Shell.runStreaming(
+                attempt.executable,
+                arguments: attempt.arguments,
+                currentDirectory: repoPath.appendingPathComponent("backend"),
+                environment: env,
+                onOutput: output)
+            if exitCode == 0 { break }
+        }
+        return exitCode
+    }
+
     /// Rewrite the installed distribution metadata without touching dependencies.
     ///
     /// Only the version is expected to have moved, and Settings reads that from
     /// the metadata rather than from the source. Best effort: a failure leaves a
     /// stale version number, which is not worth blocking a launch for.
     private func refreshDistributionMetadata(repoPath: URL) async {
-        let venvPip = repoPath.appendingPathComponent("backend/.venv/bin/pip")
-        guard FileManager.default.fileExists(atPath: venvPip.path) else { return }
-
-        var env = Shell.userEnvironment()
-        let venvDir = repoPath.appendingPathComponent("backend/.venv")
-        env["VIRTUAL_ENV"] = venvDir.path
-        env["PATH"] = venvDir.appendingPathComponent("bin").path + ":" + (env["PATH"] ?? "")
-
-        let exitCode = await Shell.runStreaming(
-            venvPip.path,
-            arguments: ["install", "-e", ".", "--no-deps", "-q"],
-            currentDirectory: repoPath.appendingPathComponent("backend"),
-            environment: env,
-            onOutput: { _ in }
-        )
+        let exitCode = await installBackend(repoPath: repoPath, extraArguments: ["--no-deps", "-q"], quiet: true)
         if exitCode != 0 {
             log("Could not refresh the version metadata; Settings may show the previous version.")
         }
@@ -611,20 +662,10 @@ final class Updater {
                 since: pull.previousHead, repoPath: repoPath)
             if depsChanged {
                 log("Backend dependencies changed — reinstalling from pyproject.toml...")
-                let venvPip = repoPath.appendingPathComponent("backend/.venv/bin/pip")
-                var env = Shell.userEnvironment()
-                let venvDir = repoPath.appendingPathComponent("backend/.venv")
-                env["VIRTUAL_ENV"] = venvDir.path
-                env["PATH"] = venvDir.appendingPathComponent("bin").path + ":" + (env["PATH"] ?? "")
-                let pipExitCode = await Shell.runStreaming(
-                    venvPip.path,
-                    arguments: ["install", "-e", "."],
-                    currentDirectory: repoPath.appendingPathComponent("backend"),
-                    environment: env,
-                    onOutput: streamToLog())
-                if pipExitCode != 0 {
-                    log("pip install failed")
-                    progress?.fail(.updatePythonPackages, reason: "pip install failed")
+                let exitCode = await installBackend(repoPath: repoPath, extraArguments: [], quiet: false)
+                if exitCode != 0 {
+                    log("Installing the backend's packages failed")
+                    progress?.fail(.updatePythonPackages, reason: "installing the backend's packages failed")
                     return false
                 }
                 installedSomething = true

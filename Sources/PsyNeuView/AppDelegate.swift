@@ -390,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 failure.messageText = "PsyNeuLink could not be updated"
                 failure.informativeText =
                     "The install was left as it was. The log window shows what "
-                    + "pip reported."
+                    + "the installer reported."
                 failure.alertStyle = .warning
                 failure.addButton(withTitle: "OK")
                 failure.runModal()
