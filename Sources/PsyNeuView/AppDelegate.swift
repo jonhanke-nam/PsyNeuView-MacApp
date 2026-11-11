@@ -232,7 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     backendRunning: self.processManager.isBackendRunning)
         }
         processManager.onServiceWaiting = { [weak self] elapsed in
-            self?.applyStartupScreen(elapsed: elapsed, backendRunning: true)
+            // Asked, not assumed: this used to pass `true`, so a server that
+            // had already exited still read as starting (#51).
+            guard let self else { return }
+            self.applyStartupScreen(elapsed: elapsed,
+                                    backendRunning: self.processManager.isBackendRunning)
         }
 
         // Set up the application menu bar
@@ -1307,7 +1311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             backendRunning: backendRunning,
             elapsed: elapsed,
             ceiling: Constants.healthTimeout,
-            reassureAfter: Constants.healthSlowAfter))
+            reassureAfter: Constants.healthSlowAfter,
+            exitDetail: processManager.lastBackendError))
 
         switch screen {
         case .app, .setupWizard:
