@@ -153,6 +153,44 @@ enum PsyNeuLinkInstall {
     /// `backend/`. PsyNeuViews before #247 have none, and install as before.
     static let lockFileName = "uv.lock"
 
+    // MARK: - No network (#57)
+
+    /// What uv prints when it couldn't reach the package index: a Mac that
+    /// woke before its Wi-Fi did, a captive portal, a dropped connection.
+    static let networkFailureMarkers = [
+        "dns error",
+        "failed to lookup address information",
+        "client error (Connect)",
+        "error sending request for url",
+        "Failed to fetch:",
+        "Network is unreachable",
+    ]
+
+    /// Whether a failed uv run failed for want of the network, rather than
+    /// for anything retrying could change.
+    static func isNetworkFailure(_ output: String) -> Bool {
+        networkFailureMarkers.contains { output.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// The same uv command, run from the cache alone. The app's cache usually
+    /// holds everything a repair or an update needs: on 2026-11-17 setup
+    /// failed offline although setuptools, versioneer and the rest were all
+    /// there, and finished in seconds from the cache once Wi-Fi was back.
+    static func offline(_ arguments: [String]) -> [String] {
+        guard !arguments.contains("--offline") else { return arguments }
+        var out = arguments
+        let at = out.first == "pip" ? min(2, out.count) : min(1, out.count)
+        out.insert("--offline", at: at)
+        return out
+    }
+
+    /// What setup says when it couldn't reach the internet, even from the
+    /// cache. Replaces "Check the logs", which sent people to forty lines of
+    /// DNS errors.
+    static let offlineMessage =
+        "PsyNeuView couldn't reach the internet to download Python packages. "
+        + "Connect to the internet, then click Try Again."
+
     /// What to do after a run ended.
     enum Outcome: Equatable, Sendable {
         case installed

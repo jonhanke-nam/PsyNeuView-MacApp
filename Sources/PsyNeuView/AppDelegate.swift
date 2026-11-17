@@ -1393,6 +1393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if repaired {
                 logCollector.add("Environment rebuilt — starting PsyNeuView.", source: .system)
                 startServices()
+            } else if installer.failedForWantOfNetwork {
+                // Not "Check the logs": the logs say dns error forty times (#57).
+                showStartingFailure(PsyNeuLinkInstall.offlineMessage)
             } else {
                 showStartingFailure(
                     "Couldn't install the Python packages PsyNeuView needs. "
@@ -2087,7 +2090,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let built = await installer.repairEnvironment(
                 repoPath: tree, pnlPipArgs: pipArgs)
             guard built, BundledPsyNeuView.hasUsableEnvironment(at: tree) else {
-                return .failure(PrepareFailure(message: "installing its Python packages failed"))
+                return .failure(PrepareFailure(message: installer.failedForWantOfNetwork
+                    ? "it couldn't reach the internet to download Python packages"
+                    : "installing its Python packages failed"))
             }
         }
         return .success(tree)
