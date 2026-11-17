@@ -108,13 +108,45 @@ struct AppIdentity: Equatable, Hashable, Sendable {
         home.appendingPathComponent(isTest ? ".psyneuview-test" : ".psyneuview", isDirectory: true)
     }
 
-    /// PsyNeuView's settings file. `~/.psynewview.json` for the real app
-    /// (the backend's own default, spelling included); inside the test
-    /// app's state folder for the test app.
+    /// PsyNeuView's settings file. `~/.psyneuview.json` for the real app
+    /// (the backend's own default); inside the test app's state folder for
+    /// the test app.
     func configFile(home: URL = Self.userHome) -> URL {
+        isTest
+            ? stateDirectory(home: home).appendingPathComponent("psyneuview.json")
+            : home.appendingPathComponent(".psyneuview.json")
+    }
+
+    /// The settings file's first name, from the project's first spelling,
+    /// "PsyNewView" (PsyNeuView#258).
+    func legacyConfigFile(home: URL = Self.userHome) -> URL {
         isTest
             ? stateDirectory(home: home).appendingPathComponent("psynewview.json")
             : home.appendingPathComponent(".psynewview.json")
+    }
+
+    /// Move the settings file to its new name, once, as the backend does
+    /// (PsyNeuView#258): when the new file isn't there and the old one is.
+    /// The real app's old name is left as a symlink to the new file, so an
+    /// older PsyNeuView, or anything else still using it, reads the same
+    /// preferences. True when it moved the file.
+    @discardableResult
+    func moveLegacyConfigFile(home: URL = Self.userHome) -> Bool {
+        let fm = FileManager.default
+        let new = configFile(home: home), old = legacyConfigFile(home: home)
+        let newThere = fm.fileExists(atPath: new.path)
+            || (try? fm.destinationOfSymbolicLink(atPath: new.path)) != nil
+        let oldIsLink = (try? fm.destinationOfSymbolicLink(atPath: old.path)) != nil
+        guard !newThere, !oldIsLink, fm.fileExists(atPath: old.path) else { return false }
+        do {
+            try fm.moveItem(at: old, to: new)
+            if !isTest {
+                try? fm.createSymbolicLink(atPath: old.path, withDestinationPath: new.lastPathComponent)
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Where the backend keeps its managed PsyNeuLink clones.
@@ -251,6 +283,8 @@ struct AppIdentity: Equatable, Hashable, Sendable {
         guard isTest else { return env }
         env["PSYNEUVIEW_CONFIG_FILE"] = configFile(home: home).path
         env["PSYNEUVIEW_CLONE_ROOT"] = cloneRoot(home: home).path
+        env["PSYNEUVIEW_WORKING_DIR"] = workingCopiesDirectory(home: home).path
+        // The old name too, for a PsyNeuView from before PsyNeuView#258.
         env["PSYNEWVIEW_WORKING_DIR"] = workingCopiesDirectory(home: home).path
         env["PSYNEUVIEW_LAYOUTS_DIR"] = layoutsDirectory(home: home).path
         return env

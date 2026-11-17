@@ -72,7 +72,7 @@ final class AppIdentityTests: XCTestCase {
                        "/Users/tester/Library/Application Support/PsyNeuView")
         XCTAssertEqual(r.logsDirectory(library: library).path, "/Users/tester/Library/Logs/PsyNeuView")
         XCTAssertEqual(r.stateDirectory(home: home).path, "/Users/tester/.psyneuview")
-        XCTAssertEqual(r.configFile(home: home).path, "/Users/tester/.psynewview.json")
+        XCTAssertEqual(r.configFile(home: home).path, "/Users/tester/.psyneuview.json")
         XCTAssertEqual(r.cloneRoot(home: home).path, "/Users/tester/.psyneuview/sources")
         XCTAssertEqual(r.workingCopiesDirectory(home: home).path, "/Users/tester/.psyneuview/working-copies")
         XCTAssertEqual(r.layoutsDirectory(home: home).path, "/Users/tester/.psyneuview/layouts")
@@ -87,7 +87,7 @@ final class AppIdentityTests: XCTestCase {
                        "/Users/tester/Library/Application Support/PsyNeuView-Test")
         XCTAssertEqual(t.logsDirectory(library: library).path, "/Users/tester/Library/Logs/PsyNeuView-Test")
         XCTAssertEqual(t.stateDirectory(home: home).path, "/Users/tester/.psyneuview-test")
-        XCTAssertEqual(t.configFile(home: home).path, "/Users/tester/.psyneuview-test/psynewview.json")
+        XCTAssertEqual(t.configFile(home: home).path, "/Users/tester/.psyneuview-test/psyneuview.json")
         XCTAssertEqual(t.cloneRoot(home: home).path, "/Users/tester/.psyneuview-test/sources")
         XCTAssertEqual(t.workingCopiesDirectory(home: home).path, "/Users/tester/.psyneuview-test/working-copies")
         XCTAssertEqual(t.layoutsDirectory(home: home).path, "/Users/tester/.psyneuview-test/layouts")
@@ -142,9 +142,9 @@ final class AppIdentityTests: XCTestCase {
     /// among them (`PSYNEWVIEW_MODELS_DIR` would fix it and disable Move…).
     func testTheTestAppPointsTheBackendAtItsOwnFolders() {
         let env = AppIdentity.test.backendOverrides(home: home)
-        XCTAssertEqual(env["PSYNEUVIEW_CONFIG_FILE"], "/Users/tester/.psyneuview-test/psynewview.json")
+        XCTAssertEqual(env["PSYNEUVIEW_CONFIG_FILE"], "/Users/tester/.psyneuview-test/psyneuview.json")
         XCTAssertEqual(env["PSYNEUVIEW_CLONE_ROOT"], "/Users/tester/.psyneuview-test/sources")
-        XCTAssertEqual(env["PSYNEWVIEW_WORKING_DIR"], "/Users/tester/.psyneuview-test/working-copies")
+        XCTAssertEqual(env["PSYNEUVIEW_WORKING_DIR"], "/Users/tester/.psyneuview-test/working-copies")
         XCTAssertEqual(env["PSYNEUVIEW_LAYOUTS_DIR"], "/Users/tester/.psyneuview-test/layouts")
         XCTAssertNil(env["PSYNEWVIEW_MODELS_DIR"])
         for value in env.values where value.hasPrefix("/") {
@@ -163,7 +163,7 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertEqual(test["PSYNEUVIEW_APP_FLAVOR"], "test")
         XCTAssertEqual(test["PSYNEUVIEW_CONFIG_FILE"], AppIdentity.test.configFile().path)
         XCTAssertEqual(test["PSYNEUVIEW_CLONE_ROOT"], AppIdentity.test.cloneRoot().path)
-        XCTAssertEqual(test["PSYNEWVIEW_WORKING_DIR"], AppIdentity.test.workingCopiesDirectory().path)
+        XCTAssertEqual(test["PSYNEUVIEW_WORKING_DIR"], AppIdentity.test.workingCopiesDirectory().path)
         XCTAssertEqual(test["PSYNEUVIEW_LAYOUTS_DIR"], AppIdentity.test.layoutsDirectory().path)
         // Still the Mac app, as far as the backend's capabilities go.
         XCTAssertEqual(test["PSYNEUVIEW_DEPLOYMENT_MODE"], "mac_app")
@@ -285,5 +285,51 @@ final class AppIdentityTests: XCTestCase {
             .contains("PsyNeuView Test app 0.5.19 launched"))
         XCTAssertTrue(LaunchLog.header(appVersion: "0.5.19", date: date, identity: .release)
             .contains("PsyNeuView app 0.5.19 launched"))
+    }
+
+    // MARK: - The settings file's new name (PsyNeuView#258)
+
+    private func tempHome() throws -> URL {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pnv-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return home
+    }
+
+    func testTheRealAppMovesTheOldFileAndLeavesALink() throws {
+        let home = try tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let old = home.appendingPathComponent(".psynewview.json")
+        try Data("{\"autosave\": true}".utf8).write(to: old)
+        XCTAssertTrue(AppIdentity.release.moveLegacyConfigFile(home: home))
+        let new = home.appendingPathComponent(".psyneuview.json")
+        XCTAssertEqual(try String(contentsOf: new, encoding: .utf8), "{\"autosave\": true}")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: old.path), ".psyneuview.json")
+        // Moving again does nothing.
+        XCTAssertFalse(AppIdentity.release.moveLegacyConfigFile(home: home))
+    }
+
+    func testAnExistingNewFileIsNeverReplaced() throws {
+        let home = try tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Data("old".utf8).write(to: home.appendingPathComponent(".psynewview.json"))
+        try Data("new".utf8).write(to: home.appendingPathComponent(".psyneuview.json"))
+        XCTAssertFalse(AppIdentity.release.moveLegacyConfigFile(home: home))
+        XCTAssertEqual(try String(contentsOf: home.appendingPathComponent(".psyneuview.json"), encoding: .utf8), "new")
+    }
+
+    func testTheTestAppMovesItsOwnFile() throws {
+        let home = try tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let state = AppIdentity.test.stateDirectory(home: home)
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: state.appendingPathComponent("psynewview.json"))
+        XCTAssertTrue(AppIdentity.test.moveLegacyConfigFile(home: home))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: state.appendingPathComponent("psyneuview.json").path))
+    }
+
+    func testBothWorkingDirectoryNamesAreSetForTheTestApp() {
+        let env = AppIdentity.test.backendOverrides(home: URL(fileURLWithPath: "/Users/tester"))
+        XCTAssertEqual(env["PSYNEUVIEW_WORKING_DIR"], env["PSYNEWVIEW_WORKING_DIR"])
+        XCTAssertNotNil(env["PSYNEUVIEW_WORKING_DIR"])
     }
 }

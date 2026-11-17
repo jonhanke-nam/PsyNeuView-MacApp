@@ -68,6 +68,10 @@ final class ProcessManager {
     /// `AppIdentity.projectFolderSeed` says to (#240). Returns the line for
     /// the launch log; nil when nothing changed. The real app never writes.
     nonisolated static func seedProjectFolder(identity: AppIdentity) -> String? {
+        // Before anything reads or writes it: the file's new name
+        // (PsyNeuView#258). Seeding a new file beside an unmoved old one
+        // would split the preferences in two.
+        identity.moveLegacyConfigFile()
         let file = identity.configFile()
         // A file that is there but can't be read is left alone, never replaced.
         let exists = FileManager.default.fileExists(atPath: file.path)
