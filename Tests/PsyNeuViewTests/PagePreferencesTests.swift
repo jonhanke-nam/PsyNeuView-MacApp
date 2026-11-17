@@ -16,6 +16,10 @@ final class PagePreferencesTests: XCTestCase {
         XCTAssertTrue(PagePreferences.isKept("psynewview_ui_prefs"))
         XCTAssertTrue(PagePreferences.isKept("psynewview_layout_outer_sizes"))
         XCTAssertTrue(PagePreferences.isKept("psynewview-gsc-legend"))
+        // The new spellings (PsyNeuView#258).
+        XCTAssertTrue(PagePreferences.isKept("psyneuview_ui_prefs"))
+        XCTAssertTrue(PagePreferences.isKept("psyneuview_layout_outer_sizes"))
+        XCTAssertTrue(PagePreferences.isKept("psyneuview-gsc-legend"))
         XCTAssertFalse(PagePreferences.isKept("psyneuview"))
         XCTAssertFalse(PagePreferences.isKept("psyneuview_x"), "the new spelling uses a dot")
         XCTAssertFalse(PagePreferences.isKept("psynewview.x"), "the old spelling uses _ or -")

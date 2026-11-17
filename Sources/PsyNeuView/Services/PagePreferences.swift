@@ -49,11 +49,12 @@ import Foundation
 enum PagePreferences {
     static let handlerName = "pnvPrefs"
 
-    /// PsyNeuView's storage-key prefixes: `psyneuview.` (newer keys, e.g.
-    /// `psyneuview.openMenu.sectionOrder`), and the older spellings
-    /// `psynewview_` / `psynewview-` (`psynewview_ui_prefs`,
-    /// `psynewview_layout_outer_sizes`, `psynewview-gsc-legend`).
-    static let prefixes = ["psyneuview.", "psynewview_", "psynewview-"]
+    /// PsyNeuView's storage-key prefixes: `psyneuview.` (e.g.
+    /// `psyneuview.openMenu.sectionOrder`), `psyneuview_` / `psyneuview-`
+    /// (`psyneuview_ui_prefs`, `psyneuview-gsc-legend`), and the first
+    /// spelling's `psynewview_` / `psynewview-`, which PsyNeuView copies to the
+    /// new names (PsyNeuView#258) and older PsyNeuViews still read.
+    static let prefixes = ["psyneuview.", "psyneuview_", "psyneuview-", "psynewview_", "psynewview-"]
 
     static let defaultsKey = "pagePreferences"
 
