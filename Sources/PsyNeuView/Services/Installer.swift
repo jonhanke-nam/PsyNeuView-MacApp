@@ -285,6 +285,15 @@ final class Installer {
     /// (#223): the fast-start preparation recompiles bytecode only then.
     private var packagesWritten = false
 
+    /// The output of the installer run in progress, to tell a network failure
+    /// from any other (#57). Reset when each run begins.
+    private var runOutput = ""
+
+    /// Whether the install failed because the internet couldn't be reached,
+    /// even after trying from the cache (#57). The starting window then says
+    /// so, instead of "Check the logs".
+    private(set) var failedForWantOfNetwork = false
+
     // MARK: - Application setup steps
 
     private func createVenv(repoPath: URL) async -> Bool {
@@ -402,6 +411,10 @@ final class Installer {
                 appendOutput("  ✓ Python dependencies installed from the lock\n")
                 return true
             }
+            if failedForWantOfNetwork {
+                stepStatuses[.installPythonDeps] = .failed(PsyNeuLinkInstall.offlineMessage)
+                return false
+            }
             appendOutput("Installing from the lock didn't work — installing without it.\n")
         }
 
@@ -447,7 +460,7 @@ final class Installer {
         var backendExitCode = await runDependencyInstall(
             uvPath: installer, venvPip: venvPip, backendDir: backendDir, environment: env)
 
-        if backendExitCode != 0, installer != nil {
+        if backendExitCode != 0, installer != nil, !failedForWantOfNetwork {
             appendOutput("uv failed (exit code \(backendExitCode)) — retrying with pip.\n")
             backendExitCode = await runDependencyInstall(
                 uvPath: nil, venvPip: venvPip, backendDir: backendDir, environment: env)
@@ -455,7 +468,9 @@ final class Installer {
 
         if backendExitCode != 0 {
             stepStatuses[.installPythonDeps] = .failed(
-                "Installing the Python dependencies failed (exit code \(backendExitCode))")
+                failedForWantOfNetwork
+                    ? PsyNeuLinkInstall.offlineMessage
+                    : "Installing the Python dependencies failed (exit code \(backendExitCode))")
             return false
         }
 
@@ -500,7 +515,7 @@ final class Installer {
         env["UV_PROJECT_ENVIRONMENT"] = venvDir.path
         appendOutput("Installing Python packages from the lock with the bundled uv...\n")
         beginTimeline(label: "Backend packages from the lock with uv", id: "backend")
-        let syncExit = await Shell.runStreaming(
+        var syncExit = await Shell.runStreaming(
             uvPath,
             arguments: PsyNeuLinkInstall.lockSyncArguments(),
             currentDirectory: backendDir,
@@ -508,6 +523,10 @@ final class Installer {
             onOutput: streamToLog()
         )
         endTimeline()
+        syncExit = await retryOfflineIfNetwork(
+            exitCode: syncExit, uvPath: uvPath, arguments: PsyNeuLinkInstall.lockSyncArguments(),
+            label: "Backend packages from the lock with uv", id: "backend",
+            backendDir: backendDir, environment: env)
         guard syncExit == 0 else {
             appendOutput("uv sync exited with code \(syncExit).\n")
             return false
@@ -544,7 +563,7 @@ final class Installer {
             appendOutput("Installing PsyNeuLink from chosen source "
                          + "(\(pnlPipArgs.joined(separator: " "))) with \(tool.name)...\n")
             beginTimeline(label: command.label, id: command.timelineID + (fellBack ? "-pip" : ""))
-            let exitCode = await Shell.runStreaming(
+            var exitCode = await Shell.runStreaming(
                 executable,
                 arguments: command.arguments,
                 currentDirectory: backendDir,
@@ -552,6 +571,15 @@ final class Installer {
                 onOutput: streamToLog()
             )
             endTimeline()
+            if tool == .uv, let uvPath {
+                exitCode = await retryOfflineIfNetwork(
+                    exitCode: exitCode, uvPath: uvPath, arguments: command.arguments,
+                    label: command.label, id: command.timelineID,
+                    backendDir: backendDir, environment: environment)
+                // pip can't reach the network either; its forty lines of
+                // retries would only bury the reason (#57).
+                if failedForWantOfNetwork { return .failed(reason: PsyNeuLinkInstall.offlineMessage) }
+            }
             let outcome = PsyNeuLinkInstall.outcome(exitCode: exitCode, tool: tool, pipAvailable: pipAvailable)
             guard case .retryWithPip(let reason) = outcome else { return outcome }
             appendOutput("\(reason) — retrying with pip. uv's output above says what it objected to.\n")
@@ -603,7 +631,11 @@ final class Installer {
             onOutput: streamToLog()
         )
         endTimeline()
-        return exitCode
+        guard let uvPath else { return exitCode }
+        return await retryOfflineIfNetwork(
+            exitCode: exitCode, uvPath: uvPath, arguments: arguments,
+            label: "Backend packages with uv", id: "backend",
+            backendDir: backendDir, environment: environment)
     }
 
     // MARK: - Timing the installers (#215)
@@ -617,6 +649,7 @@ final class Installer {
             Task { @MainActor [weak self] in
                 self?.appendOutput(text)
                 self?.feedTimeline(text, at: now)
+                self?.runOutput += text
             }
         }
     }
@@ -624,6 +657,37 @@ final class Installer {
     private func beginTimeline(label: String, id: String) {
         timeline = InstallTimeline(label: label, id: id, startedAt: Date())
         partialLine = ""
+        runOutput = ""
+    }
+
+    /// After a uv run failed: if it was the network, run the same command
+    /// again from the cache alone (#57). Returns the exit code of the last
+    /// run; sets `failedForWantOfNetwork` when the cache wasn't enough either.
+    private func retryOfflineIfNetwork(
+        exitCode: Int32,
+        uvPath: String,
+        arguments: [String],
+        label: String,
+        id: String,
+        backendDir: URL,
+        environment: [String: String]
+    ) async -> Int32 {
+        guard exitCode != 0, PsyNeuLinkInstall.isNetworkFailure(runOutput) else { return exitCode }
+        appendOutput("The internet couldn't be reached — trying again with what's already downloaded.\n")
+        beginTimeline(label: label + " (offline)", id: id + "-offline")
+        let offlineExit = await Shell.runStreaming(
+            uvPath,
+            arguments: PsyNeuLinkInstall.offline(arguments),
+            currentDirectory: backendDir,
+            environment: environment,
+            onOutput: streamToLog()
+        )
+        endTimeline()
+        if offlineExit != 0 {
+            failedForWantOfNetwork = true
+            appendOutput(PsyNeuLinkInstall.offlineMessage + "\n")
+        }
+        return offlineExit
     }
 
     /// pip and uv write in chunks; a phase marker can arrive split across two.
