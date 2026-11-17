@@ -220,11 +220,12 @@ start_backend() {
         exit 1
     fi
     # `exec` so $! is python itself, not a wrapper shell (see verify-bundled-install.sh).
-    (cd "${NEW}/backend" && exec env -u PSYNEWVIEW_WORKING_DIR -u PSYNEUVIEW_BOOT_REPORT \
+    # The working-copy folder unset under both names: the old one is still read.
+    (cd "${NEW}/backend" && exec env -u PSYNEUVIEW_WORKING_DIR -u PSYNEWVIEW_WORKING_DIR -u PSYNEUVIEW_BOOT_REPORT \
         HOME="${HOME_TMP}" \
         PSYNEUVIEW_DEPLOYMENT_MODE=mac_app \
-        PSYNEWVIEW_MODELS_DIR="${WORK}/models" \
-        PSYNEUVIEW_CONFIG_FILE="${HOME_TMP}/.psynewview.json" \
+        PSYNEUVIEW_MODELS_DIR="${WORK}/models" \
+        PSYNEUVIEW_CONFIG_FILE="${HOME_TMP}/.psyneuview.json" \
         VIRTUAL_ENV="${VENV}" PATH="${VENV}/bin:${PATH}" \
         "${VENV}/bin/python" -m uvicorn app.main:app --port "${PORT}" \
         >"${WORK}/backend-${BOOTS}.log" 2>&1) &

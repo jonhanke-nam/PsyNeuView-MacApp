@@ -230,8 +230,8 @@ fi
 PORT="$("${PYTHON}" -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
 echo "  starting uvicorn on port ${PORT} …"
 T0=$(now)
-(cd "${BACKEND}" && exec env PSYNEUVIEW_DEPLOYMENT_MODE=mac_app PSYNEWVIEW_MODELS_DIR="${WORK}/models" \
-    PSYNEUVIEW_CONFIG_FILE="${WORK}/psynewview.json" \
+(cd "${BACKEND}" && exec env PSYNEUVIEW_DEPLOYMENT_MODE=mac_app PSYNEUVIEW_MODELS_DIR="${WORK}/models" \
+    PSYNEUVIEW_CONFIG_FILE="${WORK}/psyneuview.json" \
     "${VENV}/bin/python" -m uvicorn app.main:app --port "${PORT}" > "${WORK}/backend.log" 2>&1) &
 BACKEND_PID=$!
 disown "${BACKEND_PID}" 2>/dev/null || true

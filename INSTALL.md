@@ -41,7 +41,7 @@ installer does to your machine:
 | `/Applications/PsyNeuView.app` | the app, including its own Python |
 | `~/Library/Application Support/PsyNeuView/` | PsyNeuView itself, and its Python environment |
 | `~/.psyneuview/` | PsyNeuLink sources and saved bundles |
-| `~/.psynewview.json` | settings |
+| `~/.psyneuview.json` | settings |
 | `defaults` domain `PsyNeuView` | window and launch preferences |
 
 It does not install Homebrew, does not touch your PATH, and does not change any
@@ -139,7 +139,7 @@ relaunch. Choose **Check for App Updates…** again after a short wait.
 ```bash
 rm -rf ~/Library/Application\ Support/PsyNeuView
 rm -rf ~/.psyneuview
-rm -f  ~/.psynewview.json
+rm -f  ~/.psyneuview.json ~/.psynewview.json   # the second is the old name's link
 defaults delete PsyNeuView
 ```
 
