@@ -34,7 +34,7 @@ everything else follows from it at run time (`Sources/PsyNeuView/Models/AppIdent
 | Icon | the logo | the logo with a red **TEST** ribbon |
 | Application Support (PsyNeuView and its Python environment) | `~/Library/Application Support/PsyNeuView` | `~/Library/Application Support/PsyNeuView-Test` |
 | Launch logs | `~/Library/Logs/PsyNeuView` | `~/Library/Logs/PsyNeuView-Test` |
-| PsyNeuView settings file | `~/.psynewview.json` | `~/.psyneuview-test/psynewview.json` |
+| PsyNeuView settings file | `~/.psyneuview.json` | `~/.psyneuview-test/psyneuview.json` |
 | PsyNeuLink clones, working copies, layouts, rescued models | `~/.psyneuview/…` | `~/.psyneuview-test/…` |
 | Wizard's default checkout folder | `~/Documents/PsyNeuView` | `~/Documents/PsyNeuView-Test` |
 | Default project folder (My Project Folder) | `~/Documents/PsyNeuView-My-Models` | `~/Documents/PsyNeuView-Test-Models` |
@@ -110,7 +110,7 @@ container). PsyNeuView does not read it yet; when it does, the intended use
 is a "Test build" badge in the same visual language as the developer-mode
 badge (PsyNeuView-archive#1291), and `/api/settings/info` reporting it so Report a
 Problem's page diagnostics say it too. The test app also sets
-`PSYNEUVIEW_CONFIG_FILE`, `PSYNEUVIEW_CLONE_ROOT`, `PSYNEWVIEW_WORKING_DIR`
+`PSYNEUVIEW_CONFIG_FILE`, `PSYNEUVIEW_CLONE_ROOT`, `PSYNEUVIEW_WORKING_DIR`
 and `PSYNEUVIEW_LAYOUTS_DIR` (the overrides PsyNeuView already honours) to
 its own folders; the real app sets none of them.
 
@@ -257,7 +257,7 @@ Before starting: `scripts/pnv-status` shows nothing you didn't expect;
 22. The test app's About says it is a test build; its window title carries
     the version; its App menu's update item is greyed and says updates are
     off; nothing in `~/Library/Application Support/PsyNeuView`,
-    `~/.psyneuview` or `~/.psynewview.json` changed while the test app ran
+    `~/.psyneuview` or `~/.psyneuview.json` changed while the test app ran
     (compare modification times before and after).
 23. The test app's Settings ▸ Folders ▸ My Project Folder is
     `~/Documents/PsyNeuView-Test-Models`; a Save As lands there, and nothing
@@ -335,7 +335,7 @@ the report folder from step 10 attached.
 
 **Reset the account** for next time: delete `/Applications/PsyNeuView.app`,
 `~/Library/Application Support/PsyNeuView`, `~/.psyneuview`,
-`~/.psynewview.json`, `~/Library/Logs/PsyNeuView`, `~/Documents/PsyNeuView-My-Models`,
+`~/.psyneuview.json` (and the old name's link, `~/.psynewview.json`), `~/Library/Logs/PsyNeuView`, `~/Documents/PsyNeuView-My-Models`,
 and `defaults delete com.psyneuview.macapp`. Or delete the account and make
 it again, which is the cleaner reset.
 

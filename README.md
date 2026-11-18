@@ -102,7 +102,7 @@ The Mac app is a thin wrapper around PsyNeuView's React app
    includes the port the backend happens to run on. The app reuses the last
    port when it is free, and, whatever the port, a user script in every app
    window seeds `localStorage` with the PsyNeuView keys the app kept
-   (`psyneuview.*`, `psynewview_*`, `psynewview-*`, nothing else) and posts
+   (`psyneuview.*`, `psynewview_*`, `psynewview-*`, nothing else) and posts <!-- code-scan: ok: the old names too, on purpose -->
    each later change back to the app to keep. The page needs no change and
    older PsyNeuView versions get it too.
 4. **One control and one owner per setting.** A setting has exactly one home and
