@@ -86,7 +86,8 @@ protocol SettingsBridgeHost: AnyObject {
 /// Events the app sends the page, as window CustomEvents:
 ///   `pnv:mac-settings-changed` (detail: Snapshot) after any change, so every
 ///   open window shows the same values — including when Sparkle finds an app
-///   update (#6); `pnv:open-settings` for ⌘,.
+///   update (#6); `pnv:open-settings` for ⌘,; `pnv:open-shortcuts` for
+///   Help ▸ Keyboard Shortcuts (PsyNeuView#292).
 ///
 /// All message handling is here, as a pure function over a host, so it can
 /// be tested without a web view.
@@ -115,11 +116,16 @@ enum SettingsBridge {
 
     static let changedEvent = "pnv:mac-settings-changed"
     static let openSettingsEvent = "pnv:open-settings"
+    /// Help ▸ Keyboard Shortcuts: the page's own reference opens (PsyNeuView#292).
+    static let openShortcutsEvent = "pnv:open-shortcuts"
 
     /// Posted after any change, so every window's page hears about it.
     static let didChange = Notification.Name("PsyNeuView.settingsBridgeDidChange")
     /// Posted by ⌘,; the object is the window whose page should open Settings.
     static let openRequested = Notification.Name("PsyNeuView.openWebSettings")
+    /// Posted by Help ▸ Keyboard Shortcuts; the object is the window whose
+    /// page should open its Keyboard Shortcuts reference (PsyNeuView#292).
+    static let openShortcutsRequested = Notification.Name("PsyNeuView.openWebShortcuts")
 
     struct InstallState: Equatable {
         /// "PsyNeuView 0.5.8, included with this app", or the checkout and branch.
@@ -335,6 +341,13 @@ enum SettingsBridge {
     /// page checks it when it mounts, and clears it when it opens Settings.
     static var openSettingsScript: String {
         "window.__pnvOpenSettingsRequested = true; " + eventScript(openSettingsEvent)
+    }
+
+    /// Help ▸ Keyboard Shortcuts (PsyNeuView#292). Delivered like ⌘,: the flag
+    /// covers a page that hasn't attached its listener yet. A page from before
+    /// the reference existed ignores both, harmlessly.
+    static var openShortcutsScript: String {
+        "window.__pnvOpenShortcutsRequested = true; " + eventScript(openShortcutsEvent)
     }
 
     private static func quoted(_ s: String) -> String {
