@@ -46,7 +46,9 @@ enum MenuShortcuts {
     static let zoomIn = Binding("+")
     static let zoomInUnshifted = Binding("=")
     static let zoomOut = Binding("-")
-    static let actualSize = Binding("0")
+    // ⌥⌘0, not ⌘0: bare ⌘0 is the graph's actual size (100%) in the web app
+    // (PsyNeuView#289, #292), and the menu would take it first.
+    static let actualSize = Binding("0", [.command, .option])
     // Window / Development
     static let minimize = Binding("m")
     static let switchBranch = Binding("b")
@@ -75,6 +77,8 @@ enum MenuShortcuts {
         "f",  // find in the editor
         "r",  // reload
         "1", "2", "3", "4", "5", "6", "7",  // bottom-panel tabs
+        "9",  // fit the graph to the window (PsyNeuView#289)
+        "0",  // the graph at actual size, 100% (PsyNeuView#289)
     ]
 
     /// Bare-Cmd bindings that collide with something the web app needs.

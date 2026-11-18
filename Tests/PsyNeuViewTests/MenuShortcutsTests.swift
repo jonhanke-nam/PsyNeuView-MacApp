@@ -47,18 +47,26 @@ final class MenuShortcutsTests: XCTestCase {
         // PsyNeuView-archive#1112 wants these. Listing them in reservedForTheWebApp
         // means the menu cannot take one back before they are built.
         let claimed = Set(MenuShortcuts.all.filter(\.isBareCommand).map(\.key))
-        for key in ["i", "o", "f", "1", "2", "3", "4", "5", "6", "7"] {
+        for key in ["i", "o", "f", "1", "2", "3", "4", "5", "6", "7", "9", "0"] {
             XCTAssertFalse(claimed.contains(key), "Cmd+\(key) was reserved for the web app")
         }
     }
 
     func testZoomUsesTheBrowserKeys() {
-        // ⌘+ / ⌘= / ⌘- / ⌘0, as in every browser (#178).
-        for b in [MenuShortcuts.zoomIn, MenuShortcuts.zoomInUnshifted,
-                  MenuShortcuts.zoomOut, MenuShortcuts.actualSize] {
+        // ⌘+ / ⌘= / ⌘-, as in every browser (#178).
+        for b in [MenuShortcuts.zoomIn, MenuShortcuts.zoomInUnshifted, MenuShortcuts.zoomOut] {
             XCTAssertTrue(MenuShortcuts.all.contains(b))
             XCTAssertTrue(b.isBareCommand)
         }
+    }
+
+    func testActualSizeLeavesCommandZeroToTheGraph() {
+        // ⌘0 is the graph's 100% (PsyNeuView#289), so the window's Actual
+        // Size is ⌥⌘0 (PsyNeuView#292).
+        XCTAssertTrue(MenuShortcuts.all.contains(MenuShortcuts.actualSize))
+        XCTAssertEqual(MenuShortcuts.actualSize, MenuShortcuts.Binding("0", [.command, .option]))
+        XCTAssertFalse(MenuShortcuts.actualSize.isBareCommand)
+        XCTAssertTrue(MenuShortcuts.conflicts.isEmpty)
     }
 
     func testNoTwoBindingsCollide() {
