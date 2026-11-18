@@ -580,10 +580,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
 
-        // Help menu. Report a Problem works even when PsyNeuView won't start:
-        // its screen is in the Logs window (#202, PsyNeuView-archive#1279). No
-        // shortcut, so MenuShortcuts has nothing to declare for it.
+        // Help menu. Keyboard Shortcuts opens the page's own reference, the
+        // way ⌘, opens its Settings (PsyNeuView#292); its keys (⌘/ and ?)
+        // are the page's, so a rebinding there needs nothing from the menu.
+        // Report a Problem works even when PsyNeuView won't start: its screen
+        // is in the Logs window (#202, PsyNeuView-archive#1279). Neither has a
+        // key equivalent, so MenuShortcuts has nothing to declare for them.
         let helpMenu = NSMenu(title: "Help")
+        addItem(to: helpMenu, title: "Keyboard Shortcuts", action: #selector(showKeyboardShortcuts))
         addItem(to: helpMenu, title: "Report a Problem…", action: #selector(showReportProblem))
         let helpMenuItem = NSMenuItem()
         helpMenuItem.submenu = helpMenu
@@ -1462,11 +1466,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func openAppWindow(url: URL) {
         let settingsWanted = openSettingsWhenWindowOpens
+        let shortcutsWanted = openShortcutsWhenWindowOpens
         let webView = AppWindowView(
             url: url, settingsHost: settingsHost, openSettingsOnLoad: settingsWanted,
+            openShortcutsOnLoad: shortcutsWanted,
             pagePreferences: pagePreferences,
             openWindow: { [weak self] in self?.openAppWindow(url: $0) })
         openSettingsWhenWindowOpens = false
+        openShortcutsWhenWindowOpens = false
         let hostingView = NSHostingView(rootView: webView)
 
         // The app window: it hosts PsyNeuView's React UI, where all other UI lives (PsyNeuView-archive#1279).
@@ -1794,6 +1801,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ⌘, pressed before any app window could open; Settings opens in the
     /// first one (#200).
     private var openSettingsWhenWindowOpens = false
+
+    /// Help ▸ Keyboard Shortcuts chosen before any app window could open; the
+    /// reference opens in the first one (PsyNeuView#292).
+    private var openShortcutsWhenWindowOpens = false
+
+    /// Help ▸ Keyboard Shortcuts opens PsyNeuView's own reference in the app
+    /// window (PsyNeuView#292), routed like Settings… ⌘,: there is no native
+    /// shortcuts window. The reference lists the menu's own keys too, marked
+    /// "set by macOS".
+    @objc func showKeyboardShortcuts() {
+        let window = appWindows.first(where: { $0 === NSApp.keyWindow }) ?? appWindows.last
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: SettingsBridge.openShortcutsRequested, object: window)
+            return
+        }
+        guard appState.backendPort > 0 else {
+            openShortcutsWhenWindowOpens = true
+            logCollector.add(
+                "Keyboard Shortcuts opens in the PsyNeuView window once it has started.", source: .system)
+            startingWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        openShortcutsWhenWindowOpens = true
+        showAppWindow()
+    }
 
     /// Settings… ⌘, opens PsyNeuView's Settings — the same one as the gear
     /// icon — in the app window (#200). There is no native Settings window:

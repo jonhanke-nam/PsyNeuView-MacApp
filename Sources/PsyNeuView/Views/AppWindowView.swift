@@ -13,6 +13,9 @@ struct AppWindowView: NSViewRepresentable {
     /// Open PsyNeuView's Settings once the page has loaded: ⌘, pressed while
     /// no app window was open (#200).
     var openSettingsOnLoad = false
+    /// Open the page's Help ▸ Keyboard Shortcuts once it has loaded: asked for
+    /// from the Help menu while no app window was open (PsyNeuView#292).
+    var openShortcutsOnLoad = false
     /// The app's store of the page's own preferences (#218). Nil leaves the
     /// page's `localStorage` alone, as before.
     var pagePreferences: PagePreferencesStore? = nil
@@ -82,6 +85,7 @@ struct AppWindowView: NSViewRepresentable {
         webView.pageZoom = WindowZoom.stored()
         context.coordinator.observeZoom(of: webView)
         context.coordinator.observeSettings(of: webView, openOnLoad: openSettingsOnLoad)
+        context.coordinator.observeShortcuts(openOnLoad: openShortcutsOnLoad)
 
         webView.load(URLRequest(url: url))
         return webView
@@ -120,6 +124,8 @@ struct AppWindowView: NSViewRepresentable {
         /// `openSettingsPending` and delivered when it has (#200).
         private var pageLoaded = false
         private var openSettingsPending = false
+        /// Help ▸ Keyboard Shortcuts before the page has loaded, the same way.
+        private var openShortcutsPending = false
         private let pagePreferences: PagePreferencesStore?
         private let openWindow: ((URL) -> Void)?
 
@@ -192,6 +198,31 @@ struct AppWindowView: NSViewRepresentable {
                     SettingsBridge.eventScript(SettingsBridge.changedEvent, detail: snapshot),
                     completionHandler: nil)
             })
+        }
+
+        /// Follow Help ▸ Keyboard Shortcuts for this window (PsyNeuView#292).
+        /// No native window: the page shows its own reference, as it shows
+        /// Settings for ⌘, (the thin-wrapper policy).
+        func observeShortcuts(openOnLoad: Bool) {
+            openShortcutsPending = openOnLoad
+            settingsObservers.append(NotificationCenter.default.addObserver(
+                forName: SettingsBridge.openShortcutsRequested, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self, let view = self.zoomedView,
+                      note.object == nil || (note.object as? NSWindow) === view.window
+                else { return }
+                self.openShortcuts()
+            })
+        }
+
+        /// Ask the page to open its Keyboard Shortcuts reference, now or once it has loaded.
+        func openShortcuts() {
+            guard pageLoaded, let view = zoomedView, !view.isLoading else {
+                openShortcutsPending = true
+                return
+            }
+            openShortcutsPending = false
+            view.evaluateJavaScript(SettingsBridge.openShortcutsScript, completionHandler: nil)
         }
 
         /// Ask the page to open Settings, now or once it has loaded.
@@ -484,6 +515,10 @@ struct AppWindowView: NSViewRepresentable {
             if openSettingsPending {
                 openSettingsPending = false
                 webView.evaluateJavaScript(SettingsBridge.openSettingsScript, completionHandler: nil)
+            }
+            if openShortcutsPending {
+                openShortcutsPending = false
+                webView.evaluateJavaScript(SettingsBridge.openShortcutsScript, completionHandler: nil)
             }
             // After the page loads, inject a script that retries the demos fetch.
             // The frontend's initial fetch may have failed silently if the backend

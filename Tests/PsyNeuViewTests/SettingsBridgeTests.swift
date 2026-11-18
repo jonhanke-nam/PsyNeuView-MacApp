@@ -184,6 +184,15 @@ final class SettingsBridgeTests: XCTestCase {
         XCTAssertTrue(SettingsBridge.openSettingsScript.contains("\"pnv:open-settings\""))
     }
 
+    /// Help ▸ Keyboard Shortcuts (PsyNeuView#292): the same flag-then-event
+    /// delivery as ⌘,, under the names the page listens for
+    /// (frontend/src/shortcuts/reference.ts).
+    func testHelpKeyboardShortcutsAsksThePageForItsReference() {
+        XCTAssertEqual(SettingsBridge.openShortcutsEvent, "pnv:open-shortcuts")
+        XCTAssertTrue(SettingsBridge.openShortcutsScript.hasPrefix("window.__pnvOpenShortcutsRequested = true;"))
+        XCTAssertTrue(SettingsBridge.openShortcutsScript.contains("\"pnv:open-shortcuts\""))
+    }
+
     // MARK: Report a Problem's settings (#202)
 
     func testReportSendWithTakesOneOfItsChoices() throws {
