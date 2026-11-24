@@ -99,3 +99,34 @@ final class AppUpdateWatchTests: XCTestCase {
         XCTAssertNil(v["releasedAt"])
     }
 }
+
+/// What the app asks Sparkle at every launch (#74). Sparkle on its own waits
+/// for its 4-hour interval, so a relaunch soon after a check missed a release.
+final class LaunchUpdateCheckTests: XCTestCase {
+    func testEveryLaunchRunsAFullBackgroundCheck() {
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: true), .background)
+    }
+
+    /// Someone who turned automatic checks off still sees a waiting update in
+    /// the window, but is not sent through a download or an alert.
+    func testAutomaticChecksOffOnlyAsksTheFeed() {
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false), .informationOnly)
+    }
+
+    /// The test app has no feed: nothing is asked.
+    func testTheTestAppNeverChecks() {
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: false, automaticChecks: true), .none)
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: false, automaticChecks: false), .none)
+    }
+
+    /// Soon enough to notice a release at once, late enough not to compete
+    /// with opening the window.
+    func testTheCheckRunsAFewSecondsIn() {
+        XCTAssertGreaterThanOrEqual(AppUpdateWatch.launchCheckDelay, 2)
+        XCTAssertLessThanOrEqual(AppUpdateWatch.launchCheckDelay, 15)
+    }
+}

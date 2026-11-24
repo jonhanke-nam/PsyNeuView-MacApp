@@ -84,6 +84,32 @@ enum AppUpdateWatch {
         SUStandardVersionComparator.default.compareVersion(sparkleVersion(a), toVersion: sparkleVersion(b))
     }
 
+    /// How long after start-up the launch check runs (#74): late enough that
+    /// it never competes with opening the window, soon enough that a relaunch
+    /// notices a release published minutes ago.
+    static let launchCheckDelay: TimeInterval = 5
+
+    /// What to ask Sparkle at launch (#74).
+    enum LaunchCheck: Equatable {
+        /// No feed (the test app): ask nothing.
+        case none
+        /// A full background check: finds the newest item on the person's
+        /// channels and, with automatic updates on, downloads it to install on
+        /// quit. Without automatic updates, Sparkle offers it.
+        case background
+        /// Only ask the feed what is there, so the page's notice can say so.
+        /// For someone who turned Sparkle's automatic checks off: their choice
+        /// is not overridden by a check at every launch.
+        case informationOnly
+    }
+
+    /// Sparkle only checks when its 4-hour interval has passed, so a relaunch
+    /// soon after a check never noticed a new release. Every launch now checks.
+    static func launchCheck(updatesEnabled: Bool, automaticChecks: Bool) -> LaunchCheck {
+        guard updatesEnabled else { return .none }
+        return automaticChecks ? .background : .informationOnly
+    }
+
     /// The version this app is.
     static var runningVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
