@@ -99,9 +99,18 @@ final class ProcessManager {
         repoPath: URL,
         identity: AppIdentity = .current,
         uvPath: String? = nil,
-        supportDirectory: URL? = nil
+        supportDirectory: URL? = nil,
+        pageSecretVariables: [String: String] = [:]
     ) -> [String: String] {
         var env = base
+
+        // The assistant's page secret (PsyNeuView#381; see PageSecret): only
+        // what this launch hands over, never one inherited from a shell.
+        env[PageSecret.fileVariable] = nil
+        env[PageSecret.valueVariable] = nil
+        for (key, value) in pageSecretVariables {
+            env[key] = value
+        }
 
         // Activate the venv.
         let venvDir = repoPath.appendingPathComponent("backend/.venv")
@@ -267,12 +276,27 @@ final class ProcessManager {
             logCollector.add(note, source: .system)
         }
 
+        // This launch's page secret for the assistant (PsyNeuView#381): in a
+        // file the backend reads once and deletes, or, with --reload, in a
+        // variable that survives its restarts.
+        let reload = preferences?.developerMode == true
+        var pageSecretVariables: [String: String] = [:]
+        do {
+            pageSecretVariables = try PageSecret.backendVariables(secret: PageSecret.current, reload: reload)
+        } catch {
+            logCollector.add(
+                "Couldn't hand the AI assistant its page secret (\(error.localizedDescription)); "
+                    + "the assistant's settings will refuse this window until the app is restarted.",
+                source: .system, isError: true)
+        }
+
         let env = Self.backendEnvironment(
             base: Shell.userEnvironment(),
             repoPath: repoPath,
             identity: .current,
             uvPath: Shell.bundledUvPath(),
-            supportDirectory: BundledPsyNeuView.supportDirectory()
+            supportDirectory: BundledPsyNeuView.supportDirectory(),
+            pageSecretVariables: pageSecretVariables
         )
 
         let logCollector = self.logCollector
