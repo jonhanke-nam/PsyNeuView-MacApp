@@ -33,6 +33,25 @@ protocol SettingsBridgeHost: AnyObject {
     /// Re-read the PsyNeuLink actually installed and bring the record in step
     /// (#9). The page calls this after a switch made through the backend.
     func syncPsyNeuLinkSource()
+    /// Install updates automatically when the app quits (#79): Sparkle's
+    /// `automaticallyDownloadsUpdates`. Nil when this app can't update itself
+    /// (the test app), and the page hides the switch.
+    var autoInstallUpdates: Bool? { get }
+    func setAutoInstallUpdates(_ on: Bool)
+    /// Whether the page should ask, once, "Install PsyNeuView updates
+    /// automatically when you quit?" (#79).
+    var autoInstallOffer: Bool { get }
+    /// The answer: yes turns it on; either way it is never asked again.
+    func answerAutoInstallOffer(_ yes: Bool)
+    /// When the app last asked for an update (Sparkle's last check), for About.
+    var lastUpdateCheck: Date? { get }
+    /// Install the downloaded update and relaunch now (Restart now, #79).
+    /// With nothing downloaded, opens Sparkle's update window instead.
+    func installAndRelaunch()
+    /// The version this launch updated to, for "Updated to X" (#79), as the
+    /// bridge's `justUpdated` value, or NSNull once dismissed or when none.
+    func justUpdated() -> Any
+    func dismissJustUpdated()
 }
 
 /// The `pnvSettings` bridge between PsyNeuView's Settings and the app (#200).
@@ -59,6 +78,15 @@ protocol SettingsBridgeHost: AnyObject {
 ///          starts again; the page goes away with the old server)
 ///     { op: "installUpdate" }                        -> Snapshot
 ///         (opens Sparkle's update window for the waiting app update; #6)
+///     { op: "set", key: "autoInstallUpdates", value: boolean } -> Snapshot
+///         (Sparkle's automaticallyDownloadsUpdates; also counts as the
+///          answer to the one-time offer; #79)
+///     { op: "answerAutoInstallOffer", value: boolean } -> Snapshot
+///         (the one-time "Install updates automatically?" offer; #79)
+///     { op: "installAndRelaunch" }                   -> Snapshot
+///         (Restart now: installs the downloaded update and relaunches; #79)
+///     { op: "dismissJustUpdated" }                   -> Snapshot
+///         (hides "Updated to X" in every window; #79)
 ///     { op: "syncPnlSource" }                        -> Snapshot
 ///         (re-reads the PsyNeuLink installed in the running environment and
 ///          makes the app's record match; the page calls it after a switch
@@ -67,7 +95,12 @@ protocol SettingsBridgeHost: AnyObject {
 ///     Snapshot = { install: { running, choice, checkoutPath, includedVersion,
 ///                             recentCheckouts }, autoRestart, launchAtLogin,
 ///                  developerMode, receiveReleaseCandidates, reportSendWith, reportSendTo,
-///                  reportSendToDefault, appUpdate, pnlRecord }
+///                  reportSendToDefault, appUpdate, pnlRecord,
+///                  autoInstallUpdates?, autoInstallOffer, lastUpdateCheck,
+///                  justUpdated }
+///         autoInstallUpdates: absent when the app can't update itself (#79)
+///         lastUpdateCheck: ISO 8601 time of the last check, or null (#79)
+///         justUpdated: { version, releaseNotesURL | null } | null (#79)
 ///         pnlRecord = "github:<branch>" | "pypi" | "local:<path>"
 ///           (#9; the app's record of the PsyNeuLink source, absent from apps
 ///            before it)
@@ -87,7 +120,9 @@ protocol SettingsBridgeHost: AnyObject {
 ///   `pnv:mac-settings-changed` (detail: Snapshot) after any change, so every
 ///   open window shows the same values — including when Sparkle finds an app
 ///   update (#6); `pnv:open-settings` for ⌘,; `pnv:open-shortcuts` for
-///   Help ▸ Keyboard Shortcuts (PsyNeuView#292).
+///   Help ▸ Keyboard Shortcuts (PsyNeuView#292); `pnv:app-update-ready`
+///   (detail: { version }) when an update has downloaded and installs on
+///   quit (#79).
 ///
 /// All message handling is here, as a pure function over a host, so it can
 /// be tested without a web view.
@@ -101,6 +136,8 @@ enum SettingsBridge {
         "install", "autoRestart", "launchAtLogin", "reportSendWith", "reportSendTo",
         // Shown in Developer, inside the Mac app only; Sparkle reads it.
         "receiveReleaseCandidates",
+        // General ▸ Updates (#79); Sparkle's own automaticallyDownloadsUpdates.
+        "autoInstallUpdates",
     ]
 
     /// How Report a Problem may offer to send a report (#202). "ask" shows
@@ -196,6 +233,11 @@ enum SettingsBridge {
                 host.setDeveloperMode(value)
             case "receiveReleaseCandidates":
                 host.setReceiveReleaseCandidates(value)
+            case "autoInstallUpdates":
+                guard host.autoInstallUpdates != nil else {
+                    return fail("pnvSettings: this app can't update itself")
+                }
+                host.setAutoInstallUpdates(value)
             case "install":
                 return fail("pnvSettings: switch installs with 'switchInstall'")
             default:
@@ -209,6 +251,21 @@ enum SettingsBridge {
 
         case "syncPnlSource":
             host.syncPsyNeuLinkSource()
+            return Outcome(reply: .success(snapshot(host)))
+
+        case "answerAutoInstallOffer":
+            guard let yes = body["value"] as? Bool else {
+                return fail("pnvSettings: 'answerAutoInstallOffer' takes true or false")
+            }
+            host.answerAutoInstallOffer(yes)
+            return Outcome(reply: .success(snapshot(host)))
+
+        case "installAndRelaunch":
+            host.installAndRelaunch()
+            return Outcome(reply: .success(snapshot(host)))
+
+        case "dismissJustUpdated":
+            host.dismissJustUpdated()
             return Outcome(reply: .success(snapshot(host)))
 
         case "checkInstall", "switchInstall":
@@ -243,7 +300,7 @@ enum SettingsBridge {
             choiceName = "checkout"
             checkoutPath = path
         }
-        return [
+        var snap: [String: Any] = [
             "install": [
                 "running": install.running,
                 "choice": choiceName,
@@ -262,8 +319,17 @@ enum SettingsBridge {
             "reportSendToDefault": ReportDefaults.contactEmail,
             "appUpdate": host.appUpdate(),
             "pnlRecord": host.pnlRecord,
+            "autoInstallOffer": host.autoInstallOffer,
+            "lastUpdateCheck": host.lastUpdateCheck.map(AppUpdateWatch.iso8601) ?? NSNull(),
+            "justUpdated": host.justUpdated(),
         ]
+        if let auto = host.autoInstallUpdates { snap["autoInstallUpdates"] = auto }
+        return snap
     }
+
+    /// Ops after which every open window hears the new values, not only the
+    /// one that asked.
+    static let broadcastOps: Set<String> = ["set", "answerAutoInstallOffer", "dismissJustUpdated"]
 
     /// This app's version, build and build date, for Settings ▸ About (#15).
     /// `builtAt` is an ISO 8601 time in UTC, or null for a build with no

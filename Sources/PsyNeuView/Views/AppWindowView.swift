@@ -198,6 +198,16 @@ struct AppWindowView: NSViewRepresentable {
                     SettingsBridge.eventScript(SettingsBridge.changedEvent, detail: snapshot),
                     completionHandler: nil)
             })
+            // An update downloaded and installs on quit (#79): the page's quiet notice.
+            settingsObservers.append(center.addObserver(
+                forName: AppSettingsHost.updateReady, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self, self.pageLoaded,
+                      let version = note.userInfo?["version"] as? String else { return }
+                self.zoomedView?.evaluateJavaScript(
+                    SettingsBridge.eventScript(AppUpdateWatch.readyEvent, detail: ["version": version]),
+                    completionHandler: nil)
+            })
         }
 
         /// Follow Help ▸ Keyboard Shortcuts for this window (PsyNeuView#292).
@@ -254,7 +264,8 @@ struct AppWindowView: NSViewRepresentable {
                 case .failure(let failure):
                     replyHandler(nil, failure.message)
                 }
-                if let body = body as? [String: Any], body["op"] as? String == "set",
+                if let body = body as? [String: Any], let op = body["op"] as? String,
+                   SettingsBridge.broadcastOps.contains(op),
                    case .success = outcome.reply {
                     NotificationCenter.default.post(
                         name: SettingsBridge.didChange, object: nil,

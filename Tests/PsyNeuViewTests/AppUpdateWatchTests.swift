@@ -129,4 +129,48 @@ final class LaunchUpdateCheckTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(AppUpdateWatch.launchCheckDelay, 2)
         XCTAssertLessThanOrEqual(AppUpdateWatch.launchCheckDelay, 15)
     }
+
+    // MARK: Install updates automatically (#79)
+
+    func testWithAutomaticInstallOffChecksOnlyAskSoThePageCanSay() {
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: true, autoInstall: false),
+            .informationOnly)
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: true, autoInstall: true),
+            .background)
+    }
+
+    func testChecksEveryHourWhileOpen() {
+        XCTAssertEqual(AppUpdateWatch.periodicCheckInterval, 3600)
+    }
+
+    func testTheOfferIsShownOnceToAnyoneWhoHasNotSaidYes() {
+        XCTAssertTrue(AppUpdateWatch.shouldOfferAutoInstall(updatesEnabled: true, autoInstall: false, asked: false))
+        XCTAssertFalse(AppUpdateWatch.shouldOfferAutoInstall(updatesEnabled: true, autoInstall: false, asked: true))
+        XCTAssertFalse(AppUpdateWatch.shouldOfferAutoInstall(updatesEnabled: true, autoInstall: true, asked: false))
+        XCTAssertFalse(AppUpdateWatch.shouldOfferAutoInstall(updatesEnabled: false, autoInstall: false, asked: false))
+    }
+
+    func testALaunchAfterAnUpdateSaysWhatItUpdatedTo() {
+        XCTAssertEqual(AppUpdateWatch.updatedTo(running: "0.6.15", lastRun: "0.6.14"), "0.6.15")
+        XCTAssertEqual(AppUpdateWatch.updatedTo(running: "0.6.15", lastRun: "0.6.15-rc2"), "0.6.15")
+        XCTAssertNil(AppUpdateWatch.updatedTo(running: "0.6.15", lastRun: ""), "a first run says nothing")
+        XCTAssertNil(AppUpdateWatch.updatedTo(running: "0.6.15", lastRun: "0.6.15"))
+        XCTAssertNil(AppUpdateWatch.updatedTo(running: "0.6.14", lastRun: "0.6.15"))
+    }
+
+    func testUpdatedToLinksToTheNotesSparkleFoundForThatVersion() {
+        let v = AppUpdateWatch.justUpdatedValue(version: "0.6.15", notesVersion: "0.6.15", notesURL: "https://x/n")
+        XCTAssertEqual((v as? [String: Any])?["releaseNotesURL"] as? String, "https://x/n")
+        let other = AppUpdateWatch.justUpdatedValue(version: "0.6.15", notesVersion: "0.6.16", notesURL: "https://x/n")
+        XCTAssertTrue((other as? [String: Any])?["releaseNotesURL"] is NSNull)
+        XCTAssertTrue(AppUpdateWatch.justUpdatedValue(version: nil, notesVersion: "", notesURL: "") is NSNull)
+    }
+
+    func testBridgeValueSaysWhenTheUpdateIsReadyToInstall() {
+        let found = AppUpdateWatch.Found(version: "0.6.0", releaseNotesURL: nil)
+        XCTAssertEqual(AppUpdateWatch.bridgeValue(running: "0.5.22", found: found, ready: true)["readyToInstall"] as? Bool, true)
+        XCTAssertEqual(AppUpdateWatch.bridgeValue(running: "0.5.22", found: found)["readyToInstall"] as? Bool, false)
+    }
 }

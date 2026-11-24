@@ -107,18 +107,16 @@ final class UpdateCheckConfigurationTests: XCTestCase {
         XCTAssertEqual(try infoPlist()["SUEnableAutomaticChecks"] as? Bool, true)
     }
 
-    /// Found updates download in the background and install when the app
-    /// quits or relaunches (#74). Offering without installing left a relaunch
-    /// on the old version. This is only the default for new installs: Sparkle
-    /// keeps a choice someone already made in its update window. An update
-    /// that rebuilds the Python environment does so at the next start-up, not
-    /// in the middle of someone's work.
-    func testUpdatesInstallOnQuitByDefault() throws {
+    /// Automatic install is by consent, not by default (#79): it is off until
+    /// the person says yes to the one-time question in the page, or turns on
+    /// Settings ▸ General ▸ Updates ▸ Install updates automatically. It must
+    /// still be allowed, or saying yes would mean nothing.
+    func testAutomaticInstallIsOffUntilSomeoneSaysYes() throws {
         let plist = try infoPlist()
-        XCTAssertEqual(plist["SUAutomaticallyUpdate"] as? Bool, true)
+        XCTAssertEqual(plist["SUAutomaticallyUpdate"] as? Bool, false)
         XCTAssertNotEqual(
             plist["SUAllowsAutomaticUpdates"] as? Bool, false,
-            "automatic updates must be allowed for the default to mean anything")
+            "automatic updates must be allowed for a yes to mean anything")
     }
 
     /// The self-check and Sparkle both depend on these being present.
