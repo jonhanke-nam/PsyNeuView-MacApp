@@ -108,11 +108,15 @@ final class LaunchUpdateCheckTests: XCTestCase {
             AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: true), .background)
     }
 
-    /// Someone who turned automatic checks off still sees a waiting update in
-    /// the window, but is not sent through a download or an alert.
-    func testAutomaticChecksOffOnlyAsksTheFeed() {
+    /// Someone who turned update checks off gets no scheduled check at all
+    /// (#81): the app is the only scheduler, so it honours their choice.
+    func testUpdateChecksOffMeansNoChecks() {
         XCTAssertEqual(
-            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false), .informationOnly)
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false), .none)
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false, autoInstall: true), .none)
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false, autoInstall: false), .none)
     }
 
     /// The test app has no feed: nothing is asked.
@@ -172,5 +176,88 @@ final class LaunchUpdateCheckTests: XCTestCase {
         let found = AppUpdateWatch.Found(version: "0.6.0", releaseNotesURL: nil)
         XCTAssertEqual(AppUpdateWatch.bridgeValue(running: "0.5.22", found: found, ready: true)["readyToInstall"] as? Bool, true)
         XCTAssertEqual(AppUpdateWatch.bridgeValue(running: "0.5.22", found: found)["readyToInstall"] as? Bool, false)
+    }
+}
+
+/// The app is the only scheduler (#81). Sparkle's own scheduled check ran every
+/// 4 hours and, with automatic install off, opened its own modal alert before
+/// the app's quiet check could put the notice in the page.
+final class AppOnlySchedulerTests: XCTestCase {
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "AppOnlySchedulerTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    func testOnByDefault() {
+        XCTAssertTrue(AppUpdateWatch.appChecksForUpdates(stored: nil, sparkleStored: nil))
+    }
+
+    /// The first time, the person's choice in Sparkle carries over.
+    func testSparklesChoiceCarriesOverTheFirstTime() {
+        XCTAssertFalse(AppUpdateWatch.appChecksForUpdates(stored: nil, sparkleStored: false))
+        XCTAssertTrue(AppUpdateWatch.appChecksForUpdates(stored: nil, sparkleStored: true))
+    }
+
+    /// After that, the app's own record wins: Sparkle's is always off by then.
+    func testTheAppsOwnRecordWins() {
+        XCTAssertTrue(AppUpdateWatch.appChecksForUpdates(stored: true, sparkleStored: false))
+        XCTAssertFalse(AppUpdateWatch.appChecksForUpdates(stored: false, sparkleStored: true))
+    }
+
+    func testTakingOverTurnsSparklesScheduleOff() {
+        XCTAssertTrue(AppUpdateWatch.takeOverScheduling(defaults: defaults))
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.sparkleAutomaticChecksKey) as? Bool, false)
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.checkForUpdatesKey) as? Bool, true)
+    }
+
+    /// An existing user with Sparkle's checks on keeps the app's checks on,
+    /// at this launch and every later one, though Sparkle's own is now off.
+    func testAnExistingUserKeepsChecksOnAcrossLaunches() {
+        defaults.set(true, forKey: AppUpdateWatch.sparkleAutomaticChecksKey)
+        XCTAssertTrue(AppUpdateWatch.takeOverScheduling(defaults: defaults))
+        XCTAssertTrue(AppUpdateWatch.takeOverScheduling(defaults: defaults), "second launch")
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.sparkleAutomaticChecksKey) as? Bool, false)
+    }
+
+    /// Someone who turned Sparkle's checks off keeps them off, for good.
+    func testSomeoneWhoTurnedChecksOffKeepsThemOff() {
+        defaults.set(false, forKey: AppUpdateWatch.sparkleAutomaticChecksKey)
+        XCTAssertFalse(AppUpdateWatch.takeOverScheduling(defaults: defaults))
+        XCTAssertFalse(AppUpdateWatch.takeOverScheduling(defaults: defaults), "second launch")
+        XCTAssertEqual(
+            AppUpdateWatch.launchCheck(updatesEnabled: true, automaticChecks: false, autoInstall: true), .none)
+    }
+
+    /// A background check Sparkle starts on its own is refused; one the app
+    /// asked for runs. "Check for Updates…" (the person asked) and the quiet
+    /// information-only check always run.
+    func testOnlyTheAppStartsBackgroundChecks() {
+        XCTAssertFalse(AppUpdateWatch.mayCheck(.updatesInBackground, appAskedForBackgroundCheck: false))
+        XCTAssertTrue(AppUpdateWatch.mayCheck(.updatesInBackground, appAskedForBackgroundCheck: true))
+        XCTAssertTrue(AppUpdateWatch.mayCheck(.updates, appAskedForBackgroundCheck: false))
+        XCTAssertTrue(AppUpdateWatch.mayCheck(.updateInformation, appAskedForBackgroundCheck: false))
+    }
+
+    /// The observer's permission is used up by one background check, so a
+    /// later one Sparkle starts on its own is still refused.
+    func testTheAppsPermissionIsUsedOnce() {
+        let observer = AppUpdateObserver()
+        let updater = SPUUpdater(
+            hostBundle: .main, applicationBundle: .main,
+            userDriver: SPUStandardUserDriver(hostBundle: .main, delegate: nil), delegate: nil)
+        observer.appAskedForBackgroundCheck = true
+        XCTAssertNoThrow(try observer.updater(updater, mayPerform: .updatesInBackground))
+        XCTAssertThrowsError(try observer.updater(updater, mayPerform: .updatesInBackground))
+        XCTAssertNoThrow(try observer.updater(updater, mayPerform: .updates))
     }
 }

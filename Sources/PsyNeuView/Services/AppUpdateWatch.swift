@@ -78,8 +78,8 @@ enum AppUpdateWatch {
     static let readyEvent = "pnv:app-update-ready"
 
     /// How often the app asks for an update while it is open (#79). Sparkle's
-    /// own schedule is every 4 hours; a release published in the morning
-    /// should show the same morning.
+    /// own schedule was every 4 hours, and is now off (#81); a release
+    /// published in the morning should show the same morning.
     static let periodicCheckInterval: TimeInterval = 60 * 60
 
     /// Ask "Install PsyNeuView updates automatically when you quit?" (#79)
@@ -129,9 +129,50 @@ enum AppUpdateWatch {
     /// notices a release published minutes ago.
     static let launchCheckDelay: TimeInterval = 5
 
+    // MARK: The app is the only scheduler (#81)
+
+    /// The app's own record of whether it looks for updates on its own (at
+    /// launch and hourly). Sparkle's scheduled check is always off (#81): it
+    /// ran every 4 hours on its own timer and, with automatic install off,
+    /// opened its own modal alert instead of the page's quiet notice.
+    static let checkForUpdatesKey = "checkForUpdates"
+    /// Sparkle's user-defaults key for its own scheduled checks.
+    static let sparkleAutomaticChecksKey = "SUEnableAutomaticChecks"
+
+    /// Whether the app looks for updates on its own. Its own record wins; the
+    /// first time, the person's choice in Sparkle carries over (someone who
+    /// turned Sparkle's checks off keeps them off); with neither, on.
+    static func appChecksForUpdates(stored: Bool?, sparkleStored: Bool?) -> Bool {
+        stored ?? sparkleStored ?? true
+    }
+
+    /// Take scheduling over from Sparkle, before its updater starts: record
+    /// the person's choice in the app's own key (carried over from Sparkle's
+    /// the first time) and switch Sparkle's own scheduled check off. Returns
+    /// whether the app should look for updates on its own.
+    @discardableResult
+    static func takeOverScheduling(defaults: UserDefaults) -> Bool {
+        let on = appChecksForUpdates(
+            stored: defaults.object(forKey: checkForUpdatesKey) as? Bool,
+            sparkleStored: defaults.object(forKey: sparkleAutomaticChecksKey) as? Bool)
+        defaults.set(on, forKey: checkForUpdatesKey)
+        defaults.set(false, forKey: sparkleAutomaticChecksKey)
+        return on
+    }
+
+    /// Whether Sparkle may run a check (#81). A check the person asked for
+    /// ("Check for Updates…", Install in the page) and a quiet
+    /// information-only check always may. A background check runs only when
+    /// the app asked for it: one Sparkle starts on its own timer could open
+    /// its modal alert.
+    static func mayCheck(_ kind: SPUUpdateCheck, appAskedForBackgroundCheck: Bool) -> Bool {
+        kind != .updatesInBackground || appAskedForBackgroundCheck
+    }
+
     /// What to ask Sparkle at launch (#74).
     enum LaunchCheck: Equatable {
-        /// No feed (the test app): ask nothing.
+        /// No feed (the test app), or the person turned update checks off:
+        /// ask nothing.
         case none
         /// A full background check: finds the newest item on the person's
         /// channels and, with automatic updates on, downloads it to install on
@@ -143,16 +184,18 @@ enum AppUpdateWatch {
         case informationOnly
     }
 
-    /// Sparkle only checks when its 4-hour interval has passed, so a relaunch
-    /// soon after a check never noticed a new release. Every launch now checks.
+    /// Sparkle only checked when its 4-hour interval had passed, so a relaunch
+    /// soon after a check never noticed a new release. Every launch now checks,
+    /// and every hour after; these are the app's only scheduled checks (#81).
     ///
-    /// With automatic install off (the default since #79), a background check
-    /// would show Sparkle's own alert; the information-only check lets the
-    /// page's quiet notice say an update is there instead. The hourly check
-    /// asks the same way.
+    /// With automatic install on, a background check downloads the update to
+    /// install on quit. Off (the default since #79), a background check would
+    /// show Sparkle's own alert; the information-only check lets the page's
+    /// quiet notice say an update is there instead. Someone who turned update
+    /// checks off gets none (#81).
     static func launchCheck(updatesEnabled: Bool, automaticChecks: Bool, autoInstall: Bool = true) -> LaunchCheck {
-        guard updatesEnabled else { return .none }
-        return (automaticChecks && autoInstall) ? .background : .informationOnly
+        guard updatesEnabled, automaticChecks else { return .none }
+        return autoInstall ? .background : .informationOnly
     }
 
     /// The version this app is.
@@ -173,6 +216,22 @@ final class AppUpdateObserver: NSObject, SPUUpdaterDelegate {
     /// install when the app quits (#79), with the handler that installs it
     /// and relaunches now (Restart now).
     var onReadyToInstall: ((AppUpdateWatch.Found, @escaping () -> Void) -> Void)?
+
+    /// Set by the app just before it starts a background check (#81), and
+    /// used up when Sparkle asks whether it may run one. A background check
+    /// Sparkle starts on its own is refused, so its modal alert never opens
+    /// uninvited.
+    var appAskedForBackgroundCheck = false
+
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        let asked = appAskedForBackgroundCheck
+        if updateCheck == .updatesInBackground { appAskedForBackgroundCheck = false }
+        guard AppUpdateWatch.mayCheck(updateCheck, appAskedForBackgroundCheck: asked) else {
+            throw NSError(domain: "PsyNeuView.AppUpdateWatch", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "PsyNeuView schedules its own update checks.",
+            ])
+        }
+    }
 
     func allowedChannels(for updater: SPUUpdater) -> Set<String> {
         AppUpdateWatch.allowedChannels(receiveCandidates: receiveCandidates())

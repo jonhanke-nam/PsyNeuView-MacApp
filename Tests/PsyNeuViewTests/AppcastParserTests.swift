@@ -88,23 +88,16 @@ final class UpdateCheckConfigurationTests: XCTestCase {
         return plist
     }
 
-    /// The interval and the release cadence must not be the same length.
-    ///
-    /// At 86400 they were, and a release published inside the window stayed
-    /// invisible until the next check came due — which is how 0.5.12 went
-    /// unmentioned for a morning on a machine that was running the whole time.
-    func testChecksAreFrequentEnoughToNoticeADailyRelease() throws {
-        let interval = try XCTUnwrap(infoPlist()["SUScheduledCheckInterval"] as? Int)
-        XCTAssertLessThanOrEqual(
-            interval, 6 * 60 * 60,
-            "a release can go unnoticed for up to this long")
-        XCTAssertGreaterThanOrEqual(
-            interval, 60 * 60,
-            "checking more than hourly is noise, not diligence")
-    }
-
-    func testAutomaticChecksAreOn() throws {
-        XCTAssertEqual(try infoPlist()["SUEnableAutomaticChecks"] as? Bool, true)
+    /// The app is the only scheduler (#81): Sparkle's own scheduled check is
+    /// off by default, so it never opens its modal alert on its own timer.
+    /// Being set at all also keeps Sparkle from asking permission to check.
+    /// The app checks at launch and hourly instead (AppUpdateWatch).
+    func testSparklesOwnScheduledCheckIsOff() throws {
+        let plist = try infoPlist()
+        XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, false)
+        XCTAssertNil(
+            plist["SUScheduledCheckInterval"],
+            "Sparkle schedules nothing; the app's hourly check is the schedule")
     }
 
     /// Automatic install is by consent, not by default (#79): it is off until
@@ -114,8 +107,10 @@ final class UpdateCheckConfigurationTests: XCTestCase {
     func testAutomaticInstallIsOffUntilSomeoneSaysYes() throws {
         let plist = try infoPlist()
         XCTAssertEqual(plist["SUAutomaticallyUpdate"] as? Bool, false)
-        XCTAssertNotEqual(
-            plist["SUAllowsAutomaticUpdates"] as? Bool, false,
+        // Explicitly true: otherwise Sparkle allows automatic downloads only
+        // while its own scheduled check is on, which it never is (#81).
+        XCTAssertEqual(
+            plist["SUAllowsAutomaticUpdates"] as? Bool, true,
             "automatic updates must be allowed for a yes to mean anything")
     }
 

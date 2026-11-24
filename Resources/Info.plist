@@ -24,15 +24,15 @@
 	<false/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
 	<key>SUAutomaticallyUpdate</key>
 	<false/>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUFeedURL</key>
 	<string>https://jonhanke-nam.github.io/PsyNeuView-releases/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>odz5vLU4g7U6CH++AydGJks4j6XqF3dtdPEVLHQXKk8=</string>
-	<key>SUScheduledCheckInterval</key>
-	<integer>14400</integer>
 </dict>
 </plist>

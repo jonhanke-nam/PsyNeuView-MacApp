@@ -55,11 +55,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///
     /// Not started in the test app (#209): its Info.plist has no feed, and an
     /// update would replace a test build with a release under the test name.
+    ///
+    /// The app is the only scheduler (#81): before Sparkle starts, its own
+    /// scheduled check is switched off, so it never opens its modal alert on
+    /// its own timer. The app's launch and hourly checks ask instead.
     private lazy var sparkleUpdater: SPUStandardUpdaterController = {
-        SPUStandardUpdaterController(
+        if AppIdentity.current.updatesEnabled {
+            appChecksForUpdates = AppUpdateWatch.takeOverScheduling(defaults: .standard)
+        }
+        return SPUStandardUpdaterController(
             startingUpdater: AppIdentity.current.updatesEnabled,
             updaterDelegate: appUpdateObserver, userDriverDelegate: nil)
     }()
+
+    /// Whether the app looks for updates on its own, at launch and hourly
+    /// (#81). Set when the updater starts, from the app's own record.
+    private var appChecksForUpdates = false
 
     /// Hears what Sparkle's checks find, so the page can say an update is
     /// waiting (#6). Kept here: Sparkle holds its delegate weakly.
@@ -669,13 +680,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let updater = sparkleUpdater.updater
         let check = AppUpdateWatch.launchCheck(
             updatesEnabled: AppIdentity.current.updatesEnabled,
-            automaticChecks: updater.automaticallyChecksForUpdates,
+            automaticChecks: appChecksForUpdates,
             autoInstall: updater.automaticallyDownloadsUpdates)
-        // Sparkle's own scheduled check may already be running, and an update
+        // A check the person started may already be running, and an update
         // already downloaded needs no new check.
         guard check != .none, !updater.sessionInProgress, settingsHost.installNow == nil else { return }
         switch check {
-        case .background: updater.checkForUpdatesInBackground()
+        case .background:
+            appUpdateObserver.appAskedForBackgroundCheck = true
+            updater.checkForUpdatesInBackground()
         case .informationOnly: updater.checkForUpdateInformation()
         case .none: break
         }
@@ -688,7 +701,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// since the last check, so relaunching soon after one never noticed a new
     /// release. This runs on a timer and never blocks start-up. A waiting
     /// update still shows in the window (#6): the check's finding reaches the
-    /// page through the updater delegate either way. The scheduled check stays.
+    /// page through the updater delegate either way. Sparkle's own scheduled
+    /// check is off (#81); this and the hourly check are the only ones.
     private func scheduleLaunchUpdateCheck() {
         // Touching the updater starts it, so only an app that updates itself does.
         guard AppIdentity.current.updatesEnabled else { return }
@@ -1734,8 +1748,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             pagePreferenceKeys: pagePreferences.keys,
             updateCheck: SettingsSnapshot.UpdateCheck(
                 lastCheck: sparkle.lastUpdateCheckDate,
-                automatic: sparkle.automaticallyChecksForUpdates,
-                interval: sparkle.updateCheckInterval))
+                automatic: appChecksForUpdates,
+                interval: AppUpdateWatch.periodicCheckInterval))
     }
 
     /// `window.__pnvDiagnostics()` in the page (#208, PsyNeuView-archive#1287), with
