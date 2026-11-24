@@ -23,12 +23,23 @@ final class AppState {
         backendStatus != .stopped
     }
 
-    func addLog(_ text: String, source: LogSource, isError: Bool = false) {
+    @discardableResult
+    func addLog(_ text: String, source: LogSource, isError: Bool = false) -> UUID {
         let entry = LogEntry(source: source, text: text, isError: isError)
         logs.append(entry)
         if logs.count > Constants.maxLogLines {
             logs.removeFirst(logs.count - Constants.maxLogLines)
         }
+        return entry.id
+    }
+
+    /// Change the text of a row already in the window, such as a package
+    /// count that grows (#75). False when the row is gone (cleared or trimmed).
+    @discardableResult
+    func replaceLog(id: UUID, text: String) -> Bool {
+        guard let index = logs.lastIndex(where: { $0.id == id }) else { return false }
+        logs[index] = logs[index].replacingText(text)
+        return true
     }
 
     func clearLogs() {
