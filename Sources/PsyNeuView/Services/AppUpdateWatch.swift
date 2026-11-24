@@ -55,7 +55,10 @@ enum AppUpdateWatch {
     /// releasedAt}` when an update is waiting, otherwise `{available: false}`.
     /// `releasedAt` is an ISO 8601 time in UTC, or null when the feed has no
     /// date (#15). Older pages ignore the keys; older apps never send them.
-    static func bridgeValue(running: String, found: Found?) -> [String: Any] {
+    ///
+    /// `readyToInstall` (#79) is true once the update has downloaded and will
+    /// install when the app quits; the page then says so, with Restart now.
+    static func bridgeValue(running: String, found: Found?, ready: Bool = false) -> [String: Any] {
         guard isWaiting(running: running, found: found), let found else {
             return ["available": false]
         }
@@ -65,7 +68,44 @@ enum AppUpdateWatch {
             "releaseNotesURL": found.releaseNotesURL ?? NSNull(),
             "releasedAt": found.releasedAt.map(iso8601) ?? NSNull(),
             "candidate": found.isCandidate,
+            "readyToInstall": ready,
         ]
+    }
+
+    /// The page event for an update that has downloaded and installs on quit
+    /// (#79). Detail: `{ version }`. The snapshot's `appUpdate.readyToInstall`
+    /// says the same, for a page that loads later.
+    static let readyEvent = "pnv:app-update-ready"
+
+    /// How often the app asks for an update while it is open (#79). Sparkle's
+    /// own schedule is every 4 hours; a release published in the morning
+    /// should show the same morning.
+    static let periodicCheckInterval: TimeInterval = 60 * 60
+
+    /// Ask "Install PsyNeuView updates automatically when you quit?" (#79)
+    /// once, to everyone — new installs and existing users alike — until it
+    /// is answered here or the setting is changed in Settings. Consent first:
+    /// automatic install is off until someone says yes. Someone who already
+    /// has it on (they chose it in Sparkle's own window) made that choice, so
+    /// is not asked.
+    static func shouldOfferAutoInstall(updatesEnabled: Bool, autoInstall: Bool, asked: Bool) -> Bool {
+        updatesEnabled && !asked && !autoInstall
+    }
+
+    /// The version this launch updated to, when the last launch ran an older
+    /// one (#79): the page says "Updated to X", so nobody wonders why
+    /// something changed. A first run (no record) and a downgrade say nothing.
+    static func updatedTo(running: String, lastRun: String) -> String? {
+        guard !lastRun.isEmpty, compare(running, lastRun) == .orderedDescending else { return nil }
+        return running
+    }
+
+    /// The bridge's `justUpdated` value: `{ version, releaseNotesURL }`, or
+    /// null. The notes link is the one Sparkle's feed gave for that version.
+    static func justUpdatedValue(version: String?, notesVersion: String, notesURL: String) -> Any {
+        guard let version else { return NSNull() }
+        let notes: Any = (notesVersion == version && !notesURL.isEmpty) ? notesURL : NSNull()
+        return ["version": version, "releaseNotesURL": notes]
     }
 
     /// "2026-10-15T18:33:00Z": what the page parses.
@@ -105,9 +145,14 @@ enum AppUpdateWatch {
 
     /// Sparkle only checks when its 4-hour interval has passed, so a relaunch
     /// soon after a check never noticed a new release. Every launch now checks.
-    static func launchCheck(updatesEnabled: Bool, automaticChecks: Bool) -> LaunchCheck {
+    ///
+    /// With automatic install off (the default since #79), a background check
+    /// would show Sparkle's own alert; the information-only check lets the
+    /// page's quiet notice say an update is there instead. The hourly check
+    /// asks the same way.
+    static func launchCheck(updatesEnabled: Bool, automaticChecks: Bool, autoInstall: Bool = true) -> LaunchCheck {
         guard updatesEnabled else { return .none }
-        return automaticChecks ? .background : .informationOnly
+        return (automaticChecks && autoInstall) ? .background : .informationOnly
     }
 
     /// The version this app is.
@@ -124,6 +169,10 @@ final class AppUpdateObserver: NSObject, SPUUpdaterDelegate {
     /// Whether the person asked for release candidates (Settings > Developer).
     /// Read on every check, so a change takes effect at the next one.
     var receiveCandidates: () -> Bool = { false }
+    /// Called on the main thread when an update has downloaded and will
+    /// install when the app quits (#79), with the handler that installs it
+    /// and relaunches now (Restart now).
+    var onReadyToInstall: ((AppUpdateWatch.Found, @escaping () -> Void) -> Void)?
 
     func allowedChannels(for updater: SPUUpdater) -> Set<String> {
         AppUpdateWatch.allowedChannels(receiveCandidates: receiveCandidates())
@@ -136,6 +185,23 @@ final class AppUpdateObserver: NSObject, SPUUpdaterDelegate {
             releasedAt: item.date,
             isCandidate: item.channel == AppUpdateWatch.candidatesChannel)
         DispatchQueue.main.async { self.onChange?(found) }
+    }
+
+    /// Taking this over (returning true) keeps Sparkle from asking in its own
+    /// window: the page says the update is ready instead (#79). Sparkle still
+    /// installs it when the app quits.
+    func updater(
+        _ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+        immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
+    ) -> Bool {
+        let found = AppUpdateWatch.Found(
+            version: item.displayVersionString,
+            releaseNotesURL: item.releaseNotesURL?.absoluteString,
+            releasedAt: item.date,
+            isCandidate: item.channel == AppUpdateWatch.candidatesChannel)
+        guard let onReadyToInstall else { return false }
+        DispatchQueue.main.async { onReadyToInstall(found, immediateInstallHandler) }
+        return true
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {

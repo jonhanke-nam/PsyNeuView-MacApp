@@ -112,6 +112,10 @@ final class Preferences {
     private static let tooOldOfferDismissedKey = "tooOldOfferDismissed"
     private static let includedVersionSeenKey = "includedVersionSeen"
     private static let olderCheckoutKeptForKey = "olderCheckoutKeptFor"
+    private static let autoInstallAskedKey = "autoInstallAsked"
+    private static let lastRunAppVersionKey = "lastRunAppVersion"
+    private static let foundUpdateVersionKey = "foundUpdateVersion"
+    private static let foundUpdateNotesKey = "foundUpdateNotesURL"
 
     var repoPath: URL? {
         didSet { save() }
@@ -141,6 +145,25 @@ final class Preferences {
     /// (Settings > Developer). Off by default: only people testing a release
     /// before everyone gets it turn this on.
     var receiveReleaseCandidates: Bool {
+        didSet { save() }
+    }
+    /// Whether the person has answered "Install PsyNeuView updates
+    /// automatically when you quit?" (#79), here or by changing the setting.
+    /// Asked once, never again.
+    var autoInstallAsked: Bool {
+        didSet { save() }
+    }
+    /// The app version that last ran, so a launch after an update can say
+    /// "Updated to X" (#79). Empty before the first run that records it.
+    var lastRunAppVersion: String {
+        didSet { save() }
+    }
+    /// The last update Sparkle found, and its release notes, so the notice
+    /// after the update installs can link to "What's new" (#79).
+    var foundUpdateVersion: String {
+        didSet { save() }
+    }
+    var foundUpdateNotesURL: String {
         didSet { save() }
     }
     /// The PsyNeuView branch to track. Defaults to "devel" (the active,
@@ -256,6 +279,10 @@ final class Preferences {
         self.launchAtLogin = defaults.bool(forKey: Self.launchAtLoginKey)
         self.developerMode = defaults.bool(forKey: Self.developerModeKey)
         self.receiveReleaseCandidates = defaults.bool(forKey: Self.receiveReleaseCandidatesKey)
+        self.autoInstallAsked = defaults.bool(forKey: Self.autoInstallAskedKey)
+        self.lastRunAppVersion = defaults.string(forKey: Self.lastRunAppVersionKey) ?? ""
+        self.foundUpdateVersion = defaults.string(forKey: Self.foundUpdateVersionKey) ?? ""
+        self.foundUpdateNotesURL = defaults.string(forKey: Self.foundUpdateNotesKey) ?? ""
         // Absent means a fresh install, which should get the bundled app.
         self.useBundledApp = defaults.object(forKey: Self.useBundledAppKey) as? Bool ?? true
         self.branch = defaults.string(forKey: Self.branchKey) ?? "devel"
@@ -280,6 +307,10 @@ final class Preferences {
         defaults.set(launchAtLogin, forKey: Self.launchAtLoginKey)
         defaults.set(developerMode, forKey: Self.developerModeKey)
         defaults.set(receiveReleaseCandidates, forKey: Self.receiveReleaseCandidatesKey)
+        defaults.set(autoInstallAsked, forKey: Self.autoInstallAskedKey)
+        defaults.set(lastRunAppVersion, forKey: Self.lastRunAppVersionKey)
+        defaults.set(foundUpdateVersion, forKey: Self.foundUpdateVersionKey)
+        defaults.set(foundUpdateNotesURL, forKey: Self.foundUpdateNotesKey)
         defaults.set(useBundledApp, forKey: Self.useBundledAppKey)
         defaults.set(branch, forKey: Self.branchKey)
         defaults.set(pnlSource.rawValue, forKey: Self.pnlSourceKey)
