@@ -159,9 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             self.reconcilePsyNeuLinkRecord(repoPath: self.appState.repoPath ?? self.preferences.repoPath)
         }
+        configureAutoInstall()
         appUpdateObserver.onChange = { [weak self] found in
             guard let self, let host = self.settingsHost else { return }
             MainActor.assumeIsolated {
+                if let found {
+                    // For "Updated to X · What's new" after it installs (#79).
+                    self.preferences.foundUpdateVersion = found.version
+                    self.preferences.foundUpdateNotesURL = found.releaseNotesURL ?? ""
+                }
                 guard host.foundAppUpdate != found else { return }
                 host.foundAppUpdate = found
                 // Every open window's page hears it, as after any setting change.
@@ -596,6 +602,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         NSApp.mainMenu = mainMenu
         scheduleLaunchUpdateCheck()
+        schedulePeriodicUpdateCheck()
+    }
+
+    /// The hourly check while the app is open (#79).
+    private var periodicUpdateTimer: Timer?
+
+    /// Automatic install (#79): the bridge reads and writes Sparkle's own
+    /// setting, the page hears when an update is ready to install on quit,
+    /// and a launch after an update says what it updated to.
+    private func configureAutoInstall() {
+        let running = AppUpdateWatch.runningVersion
+        settingsHost.updatedTo = AppUpdateWatch.updatedTo(
+            running: running, lastRun: preferences.lastRunAppVersion)
+        preferences.lastRunAppVersion = running
+        // Touching the updater starts it, so only an app that updates itself does.
+        guard AppIdentity.current.updatesEnabled else { return }
+        settingsHost.readAutoInstall = { [weak self] in
+            self?.sparkleUpdater.updater.automaticallyDownloadsUpdates ?? false
+        }
+        settingsHost.writeAutoInstall = { [weak self] on in
+            guard let self else { return }
+            let updater = self.sparkleUpdater.updater
+            guard updater.automaticallyDownloadsUpdates != on else { return }
+            updater.automaticallyDownloadsUpdates = on
+            self.logCollector.add(
+                "Install updates automatically: \(on ? "on" : "off").", source: .system)
+        }
+        settingsHost.readLastUpdateCheck = { [weak self] in
+            self?.sparkleUpdater.updater.lastUpdateCheckDate
+        }
+        appUpdateObserver.onReadyToInstall = { [weak self] found, install in
+            guard let self, let host = self.settingsHost else { return }
+            MainActor.assumeIsolated {
+                host.foundAppUpdate = found
+                host.installNow = install
+                self.preferences.foundUpdateVersion = found.version
+                self.preferences.foundUpdateNotesURL = found.releaseNotesURL ?? ""
+                self.logCollector.add(
+                    "App update \(found.version) is ready; it installs when you quit.", source: .system)
+                let center = NotificationCenter.default
+                center.post(name: SettingsBridge.didChange, object: nil,
+                            userInfo: ["snapshot": SettingsBridge.snapshot(host)])
+                center.post(name: AppSettingsHost.updateReady, object: nil,
+                            userInfo: ["version": found.version])
+            }
+        }
+    }
+
+    /// Ask for an update every hour while the app is open (#79), the same way
+    /// as the launch check: with automatic install on, a background check that
+    /// downloads it to install on quit; off, only asking, so the page's quiet
+    /// notice says it is there. Never while a check is already running.
+    private func schedulePeriodicUpdateCheck() {
+        guard AppIdentity.current.updatesEnabled else { return }
+        let timer = Timer(timeInterval: AppUpdateWatch.periodicCheckInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.runUpdateCheck(reason: "hourly check") }
+        }
+        timer.tolerance = 60
+        RunLoop.main.add(timer, forMode: .common)
+        periodicUpdateTimer = timer
+    }
+
+    private func runUpdateCheck(reason: String) {
+        let updater = sparkleUpdater.updater
+        let check = AppUpdateWatch.launchCheck(
+            updatesEnabled: AppIdentity.current.updatesEnabled,
+            automaticChecks: updater.automaticallyChecksForUpdates,
+            autoInstall: updater.automaticallyDownloadsUpdates)
+        // Sparkle's own scheduled check may already be running, and an update
+        // already downloaded needs no new check.
+        guard check != .none, !updater.sessionInProgress, settingsHost.installNow == nil else { return }
+        switch check {
+        case .background: updater.checkForUpdatesInBackground()
+        case .informationOnly: updater.checkForUpdateInformation()
+        case .none: break
+        }
+        logCollector.add("Checking for an app update (\(reason)).", source: .system)
     }
 
     /// Check for an app update at every launch, a few seconds in (#74).
@@ -606,23 +690,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// update still shows in the window (#6): the check's finding reaches the
     /// page through the updater delegate either way. The scheduled check stays.
     private func scheduleLaunchUpdateCheck() {
-        let updatesEnabled = AppIdentity.current.updatesEnabled
-        // Touching the updater starts it, so read it only when it may run.
-        let automaticChecks = updatesEnabled && sparkleUpdater.updater.automaticallyChecksForUpdates
-        let check = AppUpdateWatch.launchCheck(
-            updatesEnabled: updatesEnabled, automaticChecks: automaticChecks)
-        guard check != .none else { return }
+        // Touching the updater starts it, so only an app that updates itself does.
+        guard AppIdentity.current.updatesEnabled else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + AppUpdateWatch.launchCheckDelay) { [weak self] in
             guard let self else { return }
-            let updater = self.sparkleUpdater.updater
-            // Sparkle's own scheduled check may already be running.
-            guard !updater.sessionInProgress else { return }
-            switch check {
-            case .background: updater.checkForUpdatesInBackground()
-            case .informationOnly: updater.checkForUpdateInformation()
-            case .none: break
-            }
-            self.logCollector.add("Checking for an app update (launch check).", source: .system)
+            MainActor.assumeIsolated { self.runUpdateCheck(reason: "launch check") }
         }
     }
 
