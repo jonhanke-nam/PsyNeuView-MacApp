@@ -160,6 +160,33 @@ enum AppUpdateWatch {
         return on
     }
 
+    /// Record the person's choice from Settings ▸ General ▸ Updates (#83).
+    /// Sparkle's own scheduled check stays off either way: the app is still
+    /// the only scheduler, and with this off there are no automatic checks.
+    static func setAppChecksForUpdates(_ on: Bool, defaults: UserDefaults) {
+        defaults.set(on, forKey: checkForUpdatesKey)
+        defaults.set(false, forKey: sparkleAutomaticChecksKey)
+    }
+
+    /// What to do with the hourly timer when the switch changes (#83): the
+    /// change takes effect at once, not at the next launch.
+    enum PeriodicTimerChange: Equatable {
+        /// Start the hourly checks, and look once now.
+        case start
+        /// Stop the hourly checks.
+        case stop
+        /// Already as asked.
+        case keep
+    }
+
+    static func periodicTimerChange(timerRunning: Bool, checksOn: Bool) -> PeriodicTimerChange {
+        switch (timerRunning, checksOn) {
+        case (false, true): return .start
+        case (true, false): return .stop
+        default: return .keep
+        }
+    }
+
     /// Whether Sparkle may run a check (#81). A check the person asked for
     /// ("Check for Updates…", Install in the page) and a quiet
     /// information-only check always may. A background check runs only when

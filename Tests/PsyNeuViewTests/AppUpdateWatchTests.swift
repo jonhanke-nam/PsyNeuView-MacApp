@@ -229,6 +229,28 @@ final class AppOnlySchedulerTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.sparkleAutomaticChecksKey) as? Bool, false)
     }
 
+    /// The Settings switch (#83) writes the app's record and keeps Sparkle's
+    /// own schedule off, and the next launch reads the choice back.
+    func testTheSettingsSwitchIsRemembered() {
+        XCTAssertTrue(AppUpdateWatch.takeOverScheduling(defaults: defaults))
+        AppUpdateWatch.setAppChecksForUpdates(false, defaults: defaults)
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.checkForUpdatesKey) as? Bool, false)
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.sparkleAutomaticChecksKey) as? Bool, false)
+        XCTAssertFalse(AppUpdateWatch.takeOverScheduling(defaults: defaults), "next launch")
+        AppUpdateWatch.setAppChecksForUpdates(true, defaults: defaults)
+        XCTAssertTrue(AppUpdateWatch.takeOverScheduling(defaults: defaults), "next launch")
+        XCTAssertEqual(defaults.object(forKey: AppUpdateWatch.sparkleAutomaticChecksKey) as? Bool, false)
+    }
+
+    /// The change takes effect at once (#83): on starts the hourly checks,
+    /// off stops them.
+    func testTheSwitchStartsAndStopsTheHourlyChecks() {
+        XCTAssertEqual(AppUpdateWatch.periodicTimerChange(timerRunning: false, checksOn: true), .start)
+        XCTAssertEqual(AppUpdateWatch.periodicTimerChange(timerRunning: true, checksOn: false), .stop)
+        XCTAssertEqual(AppUpdateWatch.periodicTimerChange(timerRunning: true, checksOn: true), .keep)
+        XCTAssertEqual(AppUpdateWatch.periodicTimerChange(timerRunning: false, checksOn: false), .keep)
+    }
+
     /// Someone who turned Sparkle's checks off keeps them off, for good.
     func testSomeoneWhoTurnedChecksOffKeepsThemOff() {
         defaults.set(false, forKey: AppUpdateWatch.sparkleAutomaticChecksKey)

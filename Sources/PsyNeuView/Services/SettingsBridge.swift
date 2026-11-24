@@ -38,6 +38,12 @@ protocol SettingsBridgeHost: AnyObject {
     /// (the test app), and the page hides the switch.
     var autoInstallUpdates: Bool? { get }
     func setAutoInstallUpdates(_ on: Bool)
+    /// Check for updates automatically (#83): the app's own `checkForUpdates`
+    /// record (#81), at launch and hourly. Off: no automatic checks at all;
+    /// "Check for Updates…" still works. Nil when this app can't update
+    /// itself (the test app), and the page hides the switch.
+    var checkForUpdates: Bool? { get }
+    func setCheckForUpdates(_ on: Bool)
     /// Whether the page should ask, once, "Install PsyNeuView updates
     /// automatically when you quit?" (#79).
     var autoInstallOffer: Bool { get }
@@ -81,6 +87,9 @@ protocol SettingsBridgeHost: AnyObject {
 ///     { op: "set", key: "autoInstallUpdates", value: boolean } -> Snapshot
 ///         (Sparkle's automaticallyDownloadsUpdates; also counts as the
 ///          answer to the one-time offer; #79)
+///     { op: "set", key: "checkForUpdates", value: boolean } -> Snapshot
+///         (the app's automatic checks, at launch and hourly; takes effect
+///          at once; #83)
 ///     { op: "answerAutoInstallOffer", value: boolean } -> Snapshot
 ///         (the one-time "Install updates automatically?" offer; #79)
 ///     { op: "installAndRelaunch" }                   -> Snapshot
@@ -96,9 +105,11 @@ protocol SettingsBridgeHost: AnyObject {
 ///                             recentCheckouts }, autoRestart, launchAtLogin,
 ///                  developerMode, receiveReleaseCandidates, reportSendWith, reportSendTo,
 ///                  reportSendToDefault, appUpdate, pnlRecord,
-///                  autoInstallUpdates?, autoInstallOffer, lastUpdateCheck,
-///                  justUpdated }
+///                  autoInstallUpdates?, checkForUpdates?, autoInstallOffer,
+///                  lastUpdateCheck, justUpdated }
 ///         autoInstallUpdates: absent when the app can't update itself (#79)
+///         checkForUpdates: absent when the app can't update itself, or is
+///           older than #83
 ///         lastUpdateCheck: ISO 8601 time of the last check, or null (#79)
 ///         justUpdated: { version, releaseNotesURL | null } | null (#79)
 ///         pnlRecord = "github:<branch>" | "pypi" | "local:<path>"
@@ -138,6 +149,8 @@ enum SettingsBridge {
         "receiveReleaseCandidates",
         // General ▸ Updates (#79); Sparkle's own automaticallyDownloadsUpdates.
         "autoInstallUpdates",
+        // General ▸ Updates (#83); the app's own automatic checks (#81).
+        "checkForUpdates",
     ]
 
     /// How Report a Problem may offer to send a report (#202). "ask" shows
@@ -238,6 +251,11 @@ enum SettingsBridge {
                     return fail("pnvSettings: this app can't update itself")
                 }
                 host.setAutoInstallUpdates(value)
+            case "checkForUpdates":
+                guard host.checkForUpdates != nil else {
+                    return fail("pnvSettings: this app can't update itself")
+                }
+                host.setCheckForUpdates(value)
             case "install":
                 return fail("pnvSettings: switch installs with 'switchInstall'")
             default:
@@ -324,6 +342,7 @@ enum SettingsBridge {
             "justUpdated": host.justUpdated(),
         ]
         if let auto = host.autoInstallUpdates { snap["autoInstallUpdates"] = auto }
+        if let check = host.checkForUpdates { snap["checkForUpdates"] = check }
         return snap
     }
 

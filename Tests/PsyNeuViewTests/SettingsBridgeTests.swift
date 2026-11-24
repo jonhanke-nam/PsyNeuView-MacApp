@@ -58,6 +58,9 @@ final class SettingsBridgeTests: XCTestCase {
             if yes { autoInstallUpdates = true }
             asked = true
         }
+        // Check for updates automatically (#83): on by default.
+        var checkForUpdates: Bool? = true
+        func setCheckForUpdates(_ on: Bool) { checkForUpdates = on }
         var lastUpdateCheck: Date? = nil
         var relaunchRequests = 0
         func installAndRelaunch() { relaunchRequests += 1 }
@@ -358,6 +361,39 @@ final class SettingsBridgeTests: XCTestCase {
         XCTAssertEqual(snap["autoInstallOffer"] as? Bool, false)
         XCTAssertNotNil(failure(SettingsBridge.handle(
             ["op": "set", "key": "autoInstallUpdates", "value": true], host: host)))
+    }
+
+    // MARK: Check for updates automatically (#83)
+
+    func testCheckForUpdatesIsOnByDefaultInTheSnapshot() throws {
+        let host = FakeHost()
+        let snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual(snap["checkForUpdates"] as? Bool, true)
+    }
+
+    func testTurningCheckForUpdatesOffAndOnAgain() throws {
+        let host = FakeHost()
+        var c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "set", "key": "checkForUpdates", "value": false], host: host)))
+        XCTAssertEqual(host.checkForUpdates, false)
+        XCTAssertEqual(c["checkForUpdates"] as? Bool, false)
+        // Turning checks off leaves automatic install as it was.
+        XCTAssertEqual(c["autoInstallUpdates"] as? Bool, false)
+        c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "set", "key": "checkForUpdates", "value": true], host: host)))
+        XCTAssertEqual(c["checkForUpdates"] as? Bool, true)
+        XCTAssertNotNil(failure(SettingsBridge.handle(
+            ["op": "set", "key": "checkForUpdates", "value": "yes"], host: host)))
+        XCTAssertTrue(SettingsBridge.broadcastOps.contains("set"), "every window hears the change")
+    }
+
+    func testAnAppThatCantUpdateItselfHasNoCheckSwitch() throws {
+        let host = FakeHost()
+        host.checkForUpdates = nil
+        let snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertNil(snap["checkForUpdates"])
+        XCTAssertNotNil(failure(SettingsBridge.handle(
+            ["op": "set", "key": "checkForUpdates", "value": true], host: host)))
     }
 
     func testRestartNowAndDismissingUpdatedTo() throws {
