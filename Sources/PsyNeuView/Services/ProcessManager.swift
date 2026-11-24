@@ -258,6 +258,23 @@ final class ProcessManager {
             return
         }
 
+        // A launcher for the AI assistant's MCP command at a path that
+        // survives updates, rewritten for this tree on every start, and the
+        // backend told about it so the setup it shows names that path (#86,
+        // PsyNeuView#201). A failure costs only that: the setup then names
+        // this tree's own command, as it would without the app.
+        var mcpLauncherVariables: [String: String] = [:]
+        do {
+            let launcher = try McpLauncher.install(
+                repoPath: repoPath, supportDirectory: BundledPsyNeuView.supportDirectory())
+            mcpLauncherVariables = McpLauncher.backendVariables(launcher: launcher)
+        } catch {
+            logCollector.add(
+                "Couldn't write the AI assistant's MCP launcher (\(error.localizedDescription)); "
+                    + "Claude's setup will name this version's own command until it can.",
+                source: .system, isError: true)
+        }
+
         // The backend chooses and creates the models folder itself (#212); the
         // app no longer makes `~/.psyneuview/models` ahead of it. An empty
         // legacy folder would be harmless (the backend only keeps one that
@@ -285,7 +302,7 @@ final class ProcessManager {
                 "--port", String(appState.backendPort),
             ] + (preferences?.developerMode == true ? ["--reload"] : []),
             currentDirectory: repoPath.appendingPathComponent("backend"),
-            environment: env,
+            environment: env.merging(mcpLauncherVariables) { _, launcher in launcher },
             onStdout: { [weak self] text in
                 // The clock is read here, on the pipe's thread (#232).
                 let now = Date()
