@@ -36,6 +36,11 @@ final class AppSettingsHost: SettingsBridgeHost {
     /// itself (the test app).
     var readAutoInstall: (() -> Bool)?
     var writeAutoInstall: ((Bool) -> Void)?
+    /// The app's automatic update checks (#83), read and changed through the
+    /// app delegate, which owns the hourly timer. Nil getter: this app can't
+    /// update itself (the test app).
+    var readCheckForUpdates: (() -> Bool)?
+    var writeCheckForUpdates: ((Bool) -> Void)?
     /// Sparkle's last check, through the app delegate.
     var readLastUpdateCheck: (() -> Date?)?
     /// Installs the downloaded update and relaunches, once one is ready (#79).
@@ -156,6 +161,12 @@ final class AppSettingsHost: SettingsBridgeHost {
         writeAutoInstall?(on)
         // Changing the setting answers the question: it is never asked after.
         preferences.autoInstallAsked = true
+    }
+
+    var checkForUpdates: Bool? { readCheckForUpdates?() }
+
+    func setCheckForUpdates(_ on: Bool) {
+        writeCheckForUpdates?(on)
     }
 
     var autoInstallOffer: Bool {
