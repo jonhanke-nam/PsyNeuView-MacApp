@@ -107,14 +107,18 @@ final class UpdateCheckConfigurationTests: XCTestCase {
         XCTAssertEqual(try infoPlist()["SUEnableAutomaticChecks"] as? Bool, true)
     }
 
-    /// Noticing is not installing. An update can bump the bundled Python, which
-    /// rebuilds the backend venv on next launch — minutes of work that must not
-    /// start unannounced (#66). Sparkle treats a missing key as false, so the
-    /// assertion is that it is not switched on.
-    func testUpdatesAreNeverInstalledUnannounced() throws {
+    /// Found updates download in the background and install when the app
+    /// quits or relaunches (#74). Offering without installing left a relaunch
+    /// on the old version. This is only the default for new installs: Sparkle
+    /// keeps a choice someone already made in its update window. An update
+    /// that rebuilds the Python environment does so at the next start-up, not
+    /// in the middle of someone's work.
+    func testUpdatesInstallOnQuitByDefault() throws {
+        let plist = try infoPlist()
+        XCTAssertEqual(plist["SUAutomaticallyUpdate"] as? Bool, true)
         XCTAssertNotEqual(
-            try infoPlist()["SUAutomaticallyUpdate"] as? Bool, true,
-            "an update that rebuilds the venv must be the user's decision (#66)")
+            plist["SUAllowsAutomaticUpdates"] as? Bool, false,
+            "automatic updates must be allowed for the default to mean anything")
     }
 
     /// The self-check and Sparkle both depend on these being present.

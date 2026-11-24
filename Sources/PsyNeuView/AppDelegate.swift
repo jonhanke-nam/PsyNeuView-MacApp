@@ -595,11 +595,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.helpMenu = helpMenu
 
         NSApp.mainMenu = mainMenu
-        // Ask the feed once, quietly, so a waiting update shows in the window
-        // without waiting hours for Sparkle's next scheduled check (#6). No
-        // window or alert: Sparkle's own prompt still comes on its schedule.
-        if AppIdentity.current.updatesEnabled {
-            sparkleUpdater.updater.checkForUpdateInformation()
+        scheduleLaunchUpdateCheck()
+    }
+
+    /// Check for an app update at every launch, a few seconds in (#74).
+    ///
+    /// Sparkle on its own checks only when its interval (4 hours) has passed
+    /// since the last check, so relaunching soon after one never noticed a new
+    /// release. This runs on a timer and never blocks start-up. A waiting
+    /// update still shows in the window (#6): the check's finding reaches the
+    /// page through the updater delegate either way. The scheduled check stays.
+    private func scheduleLaunchUpdateCheck() {
+        let updatesEnabled = AppIdentity.current.updatesEnabled
+        // Touching the updater starts it, so read it only when it may run.
+        let automaticChecks = updatesEnabled && sparkleUpdater.updater.automaticallyChecksForUpdates
+        let check = AppUpdateWatch.launchCheck(
+            updatesEnabled: updatesEnabled, automaticChecks: automaticChecks)
+        guard check != .none else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + AppUpdateWatch.launchCheckDelay) { [weak self] in
+            guard let self else { return }
+            let updater = self.sparkleUpdater.updater
+            // Sparkle's own scheduled check may already be running.
+            guard !updater.sessionInProgress else { return }
+            switch check {
+            case .background: updater.checkForUpdatesInBackground()
+            case .informationOnly: updater.checkForUpdateInformation()
+            case .none: break
+            }
+            self.logCollector.add("Checking for an app update (launch check).", source: .system)
         }
     }
 
