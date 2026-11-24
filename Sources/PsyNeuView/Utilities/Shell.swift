@@ -229,20 +229,15 @@ enum Shell {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
-            onOutput(str)
-        }
+        // Whole lines, one pipe at a time (#75): each chunk used to go
+        // straight to `onOutput` and became its own row in the Logs window.
+        let readers = [
+            PipeLineReader(stdoutPipe, onLine: onOutput),
+            PipeLineReader(stderrPipe, onLine: onOutput),
+        ]
+        readers.forEach { $0.start() }
 
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
-            onOutput(str)
-        }
-
-        return await runAndWait(
-            process, pipes: [stdoutPipe, stderrPipe], onOutput: onOutput)
+        return await runAndWait(process, readers: readers, onOutput: onOutput)
     }
 
     /// Like runStreaming but allows writing initial data to stdin.
@@ -273,20 +268,16 @@ enum Shell {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
-            onOutput(str)
-        }
-
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
-            onOutput(str)
-        }
+        // Whole lines, one pipe at a time (#75): each chunk used to go
+        // straight to `onOutput` and became its own row in the Logs window.
+        let readers = [
+            PipeLineReader(stdoutPipe, onLine: onOutput),
+            PipeLineReader(stderrPipe, onLine: onOutput),
+        ]
+        readers.forEach { $0.start() }
 
         return await runAndWait(
-            process, pipes: [stdoutPipe, stderrPipe], onOutput: onOutput,
+            process, readers: readers, onOutput: onOutput,
             afterLaunch: {
                 // Write initial data to stdin after a short delay (let the process start)
                 if let data = stdinData {
@@ -306,15 +297,18 @@ enum Shell {
     /// finished in between, such as a small fast-forward `git pull`, exited
     /// with no handler to hear it. The continuation was never resumed, and the
     /// launch waited forever on "Starting the PsyNeuView server…".
+    ///
+    /// Each reader is finished before the wait ends (#75), so the output's
+    /// last line, even one without a newline, arrives before the exit status.
     static func runAndWait(
         _ process: Process,
-        pipes: [Pipe],
+        readers: [PipeLineReader],
         onOutput: @escaping @Sendable (String) -> Void,
         afterLaunch: () -> Void = {}
     ) async -> Int32 {
         await withCheckedContinuation { continuation in
             process.terminationHandler = { proc in
-                for pipe in pipes { pipe.fileHandleForReading.readabilityHandler = nil }
+                readers.forEach { $0.finish() }
                 continuation.resume(returning: proc.terminationStatus)
             }
             do {
@@ -322,7 +316,7 @@ enum Shell {
             } catch {
                 // Never started, so the handler will never fire: resume here.
                 process.terminationHandler = nil
-                for pipe in pipes { pipe.fileHandleForReading.readabilityHandler = nil }
+                readers.forEach { $0.finish() }
                 onOutput("Failed to launch: \(error.localizedDescription)\n")
                 continuation.resume(returning: -1)
                 return
@@ -354,30 +348,27 @@ enum Shell {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            if let str = String(data: data, encoding: .utf8) {
-                onStdout(str)
-            }
-        }
-
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            if let str = String(data: data, encoding: .utf8) {
-                onStderr(str)
-            }
-        }
+        // Whole lines (#75), as in `runStreaming`.
+        let stdoutLines = PipeLineReader(stdoutPipe, onLine: onStdout)
+        let stderrLines = PipeLineReader(stderrPipe, onLine: onStderr)
+        stdoutLines.start()
+        stderrLines.start()
 
         process.terminationHandler = { proc in
-            // Clean up handlers
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            // The last lines first, then the exit.
+            stdoutLines.finish()
+            stderrLines.finish()
             onTermination(proc.terminationStatus)
         }
 
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            stdoutLines.finish()
+            stderrLines.finish()
+            throw error
+        }
         return process
     }
 
