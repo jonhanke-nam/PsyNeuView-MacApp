@@ -1382,7 +1382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let installer = Installer()
         installer.onOutput = { [weak self] text in
-            self?.logCollector.add(text, source: .system)
+            self?.logCollector.add(text, source: .installer)
         }
         installer.onStepChange = { [weak self] step, status in
             self?.startupProgress?.apply(step, status)
@@ -1866,7 +1866,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func runUnattendedSetup() async {
         let installer = Installer()
         installer.onOutput = { [weak self] text in
-            self?.logCollector.add(text, source: .system)
+            self?.logCollector.add(text, source: .installer)
         }
         installer.onStepChange = { [weak self] step, status in
             self?.startupProgress?.apply(step, status)

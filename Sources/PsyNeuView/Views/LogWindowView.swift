@@ -138,6 +138,7 @@ struct LogLineView: View {
         switch entry.source {
         case .backend:  return .blue
         case .frontend: return .green
+        case .installer: return .purple
         case .system:   return .orange
         }
     }

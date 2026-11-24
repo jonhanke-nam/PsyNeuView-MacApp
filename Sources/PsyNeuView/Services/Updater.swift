@@ -75,8 +75,10 @@ final class Updater {
         }
     }
 
-    private func log(_ message: String) {
-        logCollector.add(message, source: .system)
+    /// `source` is `.installer` for what git, uv, pip and npm print (#75),
+    /// and `.system` for the updater's own messages.
+    private func log(_ message: String, source: LogSource = .system) {
+        logCollector.add(message, source: source)
         onOutput?(message)
     }
 
@@ -120,7 +122,7 @@ final class Updater {
             currentDirectory: repoPath,
             onOutput: { [weak self] text in
                 Task { @MainActor [weak self] in
-                    self?.log(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    self?.log(text.trimmingCharacters(in: .whitespacesAndNewlines), source: .installer)
                 }
             }
         )
@@ -865,7 +867,7 @@ final class Updater {
     private func streamToLog() -> @Sendable (String) -> Void {
         { [weak self] text in
             Task { @MainActor [weak self] in
-                self?.log(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                self?.log(text.trimmingCharacters(in: .whitespacesAndNewlines), source: .installer)
             }
         }
     }

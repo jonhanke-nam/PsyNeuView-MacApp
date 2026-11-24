@@ -41,7 +41,7 @@ final class ShellWaitTests: XCTestCase {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/nonexistent/definitely-not-here")
         let status = await withTimeout(seconds: 5) {
-            await Shell.runAndWait(process, pipes: [], onOutput: { _ in })
+            await Shell.runAndWait(process, readers: [], onOutput: { _ in })
         }
         XCTAssertEqual(status, -1)
     }
