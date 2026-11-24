@@ -22,6 +22,10 @@ struct AppWindowView: NSViewRepresentable {
     /// Opens another PsyNeuView window for the page (PsyNeuView#172). Nil
     /// leaves the bridge out, and the page doesn't offer one.
     var openWindow: ((URL) -> Void)? = nil
+    /// The AI assistant's page secret (PsyNeuView#381), put into the page's
+    /// `sessionStorage` before its scripts run. Nil leaves it out, and the
+    /// page's assistant settings say they can't be used from this window.
+    var pageSecret: String? = PageSecret.current
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -61,6 +65,11 @@ struct AppWindowView: NSViewRepresentable {
                 context.coordinator, contentWorld: .page, name: PagePreferences.handlerName)
         }
 
+        // The assistant's page secret (PsyNeuView#381): at document start,
+        // main frame only, and only on the backend's own origin. Never sent
+        // over HTTP; see PageSecret.
+        context.coordinator.injectPageSecret(pageSecret, for: url, into: config.userContentController)
+
         // Another window for the page; see WindowBridge. No reply.
         if openWindow != nil {
             config.userContentController.add(
@@ -94,6 +103,9 @@ struct AppWindowView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         // Only reload if the URL actually changed
         if webView.url != url {
+            // A backend on a new port is a new origin: its page needs the secret too.
+            context.coordinator.injectPageSecret(
+                pageSecret, for: url, into: webView.configuration.userContentController)
             webView.load(URLRequest(url: url))
         }
     }
@@ -136,6 +148,22 @@ struct AppWindowView: NSViewRepresentable {
             self.settingsHost = settingsHost
             self.pagePreferences = pagePreferences
             self.openWindow = openWindow
+        }
+
+        // MARK: Page secret (PsyNeuView#381)
+
+        /// Origins this window's page secret script already covers.
+        private var secretOrigins: Set<String> = []
+
+        /// Add the user script that hands `secret` to the page at `url`'s
+        /// origin, once per origin.
+        func injectPageSecret(_ secret: String?, for url: URL, into controller: WKUserContentController) {
+            guard let secret, let origin = PageSecret.origin(of: url), !secretOrigins.contains(origin) else { return }
+            secretOrigins.insert(origin)
+            controller.addUserScript(WKUserScript(
+                source: PageSecret.userScript(secret: secret, origin: origin),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true))
         }
 
         // MARK: pnvPrefs (#218)
