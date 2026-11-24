@@ -640,6 +640,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.logCollector.add(
                 "Install updates automatically: \(on ? "on" : "off").", source: .system)
         }
+        settingsHost.readCheckForUpdates = { [weak self] in
+            guard let self else { return false }
+            _ = self.sparkleUpdater  // sets appChecksForUpdates from the app's record
+            return self.appChecksForUpdates
+        }
+        settingsHost.writeCheckForUpdates = { [weak self] on in
+            self?.setAppChecksForUpdates(on)
+        }
         settingsHost.readLastUpdateCheck = { [weak self] in
             self?.sparkleUpdater.updater.lastUpdateCheckDate
         }
@@ -667,6 +675,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// notice says it is there. Never while a check is already running.
     private func schedulePeriodicUpdateCheck() {
         guard AppIdentity.current.updatesEnabled else { return }
+        _ = sparkleUpdater  // sets appChecksForUpdates from the app's record
+        // Off (#83): no hourly timer at all.
+        guard appChecksForUpdates, periodicUpdateTimer == nil else { return }
         let timer = Timer(timeInterval: AppUpdateWatch.periodicCheckInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
             MainActor.assumeIsolated { self.runUpdateCheck(reason: "hourly check") }
@@ -674,6 +685,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer.tolerance = 60
         RunLoop.main.add(timer, forMode: .common)
         periodicUpdateTimer = timer
+    }
+
+    /// Settings ▸ General ▸ Updates ▸ Check for updates automatically (#83).
+    /// Takes effect at once: on starts the hourly checks and looks once now;
+    /// off stops them, and nothing checks until it is turned back on or the
+    /// person picks "Check for Updates…".
+    private func setAppChecksForUpdates(_ on: Bool) {
+        guard AppIdentity.current.updatesEnabled else { return }
+        _ = sparkleUpdater
+        guard appChecksForUpdates != on else { return }
+        appChecksForUpdates = on
+        AppUpdateWatch.setAppChecksForUpdates(on, defaults: .standard)
+        logCollector.add("Check for updates automatically: \(on ? "on" : "off").", source: .system)
+        switch AppUpdateWatch.periodicTimerChange(timerRunning: periodicUpdateTimer != nil, checksOn: on) {
+        case .start:
+            schedulePeriodicUpdateCheck()
+            runUpdateCheck(reason: "checks turned on")
+        case .stop:
+            periodicUpdateTimer?.invalidate()
+            periodicUpdateTimer = nil
+        case .keep:
+            break
+        }
     }
 
     private func runUpdateCheck(reason: String) {
