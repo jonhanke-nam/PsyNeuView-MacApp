@@ -45,6 +45,27 @@ final class SettingsBridgeTests: XCTestCase {
         var pnlRecord = "github:devel"
         var pnlSyncRequests = 0
         func syncPsyNeuLinkSource() { pnlSyncRequests += 1; pnlRecord = "local:/checkout" }
+        // Automatic install (#79): off until someone says yes.
+        var autoInstallUpdates: Bool? = false
+        var asked = false
+        func setAutoInstallUpdates(_ on: Bool) { autoInstallUpdates = on; asked = true }
+        var autoInstallOffer: Bool {
+            AppUpdateWatch.shouldOfferAutoInstall(
+                updatesEnabled: autoInstallUpdates != nil,
+                autoInstall: autoInstallUpdates ?? false, asked: asked)
+        }
+        func answerAutoInstallOffer(_ yes: Bool) {
+            if yes { autoInstallUpdates = true }
+            asked = true
+        }
+        var lastUpdateCheck: Date? = nil
+        var relaunchRequests = 0
+        func installAndRelaunch() { relaunchRequests += 1 }
+        var updatedTo: String? = nil
+        func justUpdated() -> Any {
+            AppUpdateWatch.justUpdatedValue(version: updatedTo, notesVersion: "", notesURL: "")
+        }
+        func dismissJustUpdated() { updatedTo = nil }
     }
 
     private func reply(_ outcome: SettingsBridge.Outcome) -> [String: Any]? {
@@ -291,5 +312,63 @@ final class SettingsBridgeTests: XCTestCase {
         let snapshot = try XCTUnwrap(reply(SettingsBridge.handle(["op": "syncPnlSource"], host: host)))
         XCTAssertEqual(host.pnlSyncRequests, 1)
         XCTAssertEqual(snapshot["pnlRecord"] as? String, "local:/checkout")
+    }
+
+    // MARK: Install updates automatically (#79)
+
+    func testAutoInstallIsOffAndOfferedUntilAnswered() throws {
+        let host = FakeHost()
+        let snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual(snap["autoInstallUpdates"] as? Bool, false)
+        XCTAssertEqual(snap["autoInstallOffer"] as? Bool, true)
+        XCTAssertTrue(snap["lastUpdateCheck"] is NSNull)
+        XCTAssertTrue(snap["justUpdated"] is NSNull)
+    }
+
+    func testYesTurnsItOnAndIsNeverAskedAgain() throws {
+        let host = FakeHost()
+        let c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "answerAutoInstallOffer", "value": true], host: host)))
+        XCTAssertEqual(c["autoInstallUpdates"] as? Bool, true)
+        XCTAssertEqual(c["autoInstallOffer"] as? Bool, false)
+    }
+
+    func testNotNowLeavesItOffAndIsNeverAskedAgain() throws {
+        let host = FakeHost()
+        let c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "answerAutoInstallOffer", "value": false], host: host)))
+        XCTAssertEqual(c["autoInstallUpdates"] as? Bool, false)
+        XCTAssertEqual(c["autoInstallOffer"] as? Bool, false)
+        XCTAssertNotNil(failure(SettingsBridge.handle(["op": "answerAutoInstallOffer"], host: host)))
+    }
+
+    func testTheSettingSetsItAndCountsAsTheAnswer() throws {
+        let host = FakeHost()
+        let c = try XCTUnwrap(reply(SettingsBridge.handle(
+            ["op": "set", "key": "autoInstallUpdates", "value": true], host: host)))
+        XCTAssertEqual(c["autoInstallUpdates"] as? Bool, true)
+        XCTAssertEqual(c["autoInstallOffer"] as? Bool, false)
+    }
+
+    func testAnAppThatCantUpdateItselfHasNoSwitchAndNoOffer() throws {
+        let host = FakeHost()
+        host.autoInstallUpdates = nil
+        let snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertNil(snap["autoInstallUpdates"])
+        XCTAssertEqual(snap["autoInstallOffer"] as? Bool, false)
+        XCTAssertNotNil(failure(SettingsBridge.handle(
+            ["op": "set", "key": "autoInstallUpdates", "value": true], host: host)))
+    }
+
+    func testRestartNowAndDismissingUpdatedTo() throws {
+        let host = FakeHost()
+        host.updatedTo = "0.6.15"
+        var snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "get"], host: host)))
+        XCTAssertEqual((snap["justUpdated"] as? [String: Any])?["version"] as? String, "0.6.15")
+        _ = SettingsBridge.handle(["op": "installAndRelaunch"], host: host)
+        XCTAssertEqual(host.relaunchRequests, 1)
+        snap = try XCTUnwrap(reply(SettingsBridge.handle(["op": "dismissJustUpdated"], host: host)))
+        XCTAssertTrue(snap["justUpdated"] is NSNull)
+        XCTAssertTrue(SettingsBridge.broadcastOps.isSuperset(of: ["set", "answerAutoInstallOffer", "dismissJustUpdated"]))
     }
 }

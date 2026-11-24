@@ -27,6 +27,22 @@ final class AppSettingsHost: SettingsBridgeHost {
     /// running environment belongs to the app delegate, so it does this.
     var onSyncPsyNeuLinkSource: (() -> Void)?
 
+    /// Posted when an update has downloaded and installs on quit (#79);
+    /// userInfo["version"]. Every window's page shows its quiet notice.
+    static let updateReady = Notification.Name("PsyNeuView.appUpdateReady")
+
+    /// Sparkle's `automaticallyDownloadsUpdates`, read and written through the
+    /// app delegate, which owns the updater. Nil getter: this app can't update
+    /// itself (the test app).
+    var readAutoInstall: (() -> Bool)?
+    var writeAutoInstall: ((Bool) -> Void)?
+    /// Sparkle's last check, through the app delegate.
+    var readLastUpdateCheck: (() -> Date?)?
+    /// Installs the downloaded update and relaunches, once one is ready (#79).
+    var installNow: (() -> Void)?
+    /// The version this launch updated to (#79), until dismissed.
+    var updatedTo: String?
+
     init(preferences: Preferences) {
         self.preferences = preferences
     }
@@ -120,7 +136,8 @@ final class AppSettingsHost: SettingsBridgeHost {
     }
 
     func appUpdate() -> [String: Any] {
-        AppUpdateWatch.bridgeValue(running: AppUpdateWatch.runningVersion, found: foundAppUpdate)
+        AppUpdateWatch.bridgeValue(
+            running: AppUpdateWatch.runningVersion, found: foundAppUpdate, ready: readyToInstall)
     }
 
     func installAppUpdate() {
@@ -132,6 +149,46 @@ final class AppSettingsHost: SettingsBridgeHost {
     func syncPsyNeuLinkSource() {
         onSyncPsyNeuLinkSource?()
     }
+
+    var autoInstallUpdates: Bool? { readAutoInstall?() }
+
+    func setAutoInstallUpdates(_ on: Bool) {
+        writeAutoInstall?(on)
+        // Changing the setting answers the question: it is never asked after.
+        preferences.autoInstallAsked = true
+    }
+
+    var autoInstallOffer: Bool {
+        AppUpdateWatch.shouldOfferAutoInstall(
+            updatesEnabled: readAutoInstall != nil,
+            autoInstall: autoInstallUpdates ?? false,
+            asked: preferences.autoInstallAsked)
+    }
+
+    func answerAutoInstallOffer(_ yes: Bool) {
+        if yes { writeAutoInstall?(true) }
+        preferences.autoInstallAsked = true
+    }
+
+    var lastUpdateCheck: Date? { readLastUpdateCheck?() }
+
+    func installAndRelaunch() {
+        if let installNow { installNow() } else { onInstallAppUpdate?() }
+    }
+
+    func justUpdated() -> Any {
+        AppUpdateWatch.justUpdatedValue(
+            version: updatedTo,
+            notesVersion: preferences.foundUpdateVersion,
+            notesURL: preferences.foundUpdateNotesURL)
+    }
+
+    func dismissJustUpdated() {
+        updatedTo = nil
+    }
+
+    /// The update is ready to install on quit (#79).
+    var readyToInstall: Bool { installNow != nil }
 
     func switchInstall(_ decision: InstallSwitch.Decision) {
         onSwitchInstall?(decision)
